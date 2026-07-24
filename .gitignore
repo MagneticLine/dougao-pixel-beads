@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.next/
+.wrangler/
+public/
+.tmp-browser-test/
+*.tgz

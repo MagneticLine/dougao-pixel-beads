@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f1e7" />
+    <meta name="description" content="在浏览器本地把模糊、压缩的像素图还原成颜色稳定、边缘干净的拼豆图纸。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="豆稿 · 像素图转拼豆图纸" />
+    <meta property="og:description" content="把模糊、压缩的像素图整理成能照着拼的清晰图纸，图片仅在本机处理。" />
+    <meta property="og:image" content="./og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="豆稿 · 像素图转拼豆图纸" />
+    <meta name="twitter:description" content="把模糊、压缩的像素图整理成能照着拼的清晰图纸。" />
+    <meta name="twitter:image" content="./og.png" />
+    <title>豆稿 · 像素图转拼豆图纸</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=6" />
+    <link rel="stylesheet" href="./styles.css?v=6" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="豆稿首页">
+        <span class="brand-mark" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </span>
+        <span>
+          <b>豆稿</b>
+          <small>PIXEL TO BEADS</small>
+        </span>
+      </a>
+      <div class="privacy-pill"><span></span> 图片仅在本机处理</div>
+      <button class="icon-button" id="helpButton" type="button" aria-label="打开使用说明">?</button>
+    </header>
+
+    <main>
+      <section class="hero" id="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">像素修复 · 网格识别 · 稳定取色</p>
+          <h1>把模糊像素图，<br />变成<strong>能照着拼</strong>的图纸。</h1>
+          <p class="hero-desc">
+            自动识别每一颗豆的位置，避开压缩杂色和模糊边缘，合并近似色并统计用量。
+            无需登录，不上传图片。
+          </p>
+        </div>
+
+        <div class="upload-card" id="dropZone">
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
+          <div class="upload-visual" aria-hidden="true">
+            <div class="mini-pattern">
+              <i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+          <h2>拖一张像素图到这里</h2>
+          <p>也可以粘贴图片，或从相册中选择</p>
+          <button class="primary-button" id="selectButton" type="button">
+            <span aria-hidden="true">＋</span> 选择图片
+          </button>
+          <small>支持 PNG、JPG、WebP、GIF、BMP · 建议小于 20 MB</small>
+        </div>
+
+        <div class="feature-strip" aria-label="主要能力">
+          <div><span>01</span><b>识别网格</b><small>自动推测行列数</small></div>
+          <div><span>02</span><b>清理杂色</b><small>避开边缘与压缩噪点</small></div>
+          <div><span>03</span><b>合并近色</b><small>控制实际采购色数</small></div>
+          <div><span>04</span><b>导出图纸</b><small>编号、数量一目了然</small></div>
+        </div>
+      </section>
+
+      <section class="workspace" id="workspace" hidden>
+        <div class="work-head">
+          <div>
+            <p class="eyebrow">正在处理</p>
+            <h1 id="fileName">未命名图稿</h1>
+          </div>
+          <div class="head-actions">
+            <button class="text-button" id="replaceButton" type="button">更换图片</button>
+            <button class="primary-button compact" id="exportButton" type="button">导出图纸</button>
+          </div>
+        </div>
+
+        <div class="editor-layout">
+          <aside class="controls" aria-label="图纸参数">
+            <div class="control-section">
+              <button class="section-title" type="button" aria-expanded="true">
+                <span><em>1</em> 网格与裁切</span><i>⌃</i>
+              </button>
+              <div class="section-body">
+                <div class="source-thumb">
+                  <canvas id="sourceCanvas" aria-label="原图裁切预览"></canvas>
+                  <div class="crop-mask" aria-hidden="true"></div>
+                </div>
+                <div class="crop-grid">
+                  <label>左 <input id="cropLeft" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
+                  <label>右 <input id="cropRight" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
+                  <label>上 <input id="cropTop" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
+                  <label>下 <input id="cropBottom" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
+                </div>
+                <div class="field-row">
+                  <label>列数<input id="gridCols" type="number" min="2" max="200" value="32" inputmode="numeric" /></label>
+                  <span>×</span>
+                  <label>行数<input id="gridRows" type="number" min="2" max="200" value="32" inputmode="numeric" /></label>
+                </div>
+                <button class="secondary-button full" id="detectButton" type="button">
+                  <span aria-hidden="true">✦</span> 重新自动识别
+                </button>
+                <p class="hint" id="detectHint">上传后将自动推测网格尺寸。</p>
+              </div>
+            </div>
+
+            <div class="control-section">
+              <button class="section-title" type="button" aria-expanded="true">
+                <span><em>2</em> 颜色清理</span><i>⌃</i>
+              </button>
+              <div class="section-body">
+                <label class="range-field">
+                  <span>去杂色强度 <output id="denoiseValue">标准</output></span>
+                  <input id="denoise" type="range" min="0" max="3" value="2" />
+                  <small><i>保留细节</i><i>边缘干净</i></small>
+                </label>
+                <label class="range-field">
+                  <span>近似色合并 <output id="mergeValue">适中</output></span>
+                  <input id="colorMerge" type="range" min="0" max="4" value="2" />
+                  <small><i>更多原色</i><i>更少采购色</i></small>
+                </label>
+                <label class="select-field">
+                  <span>最多颜色</span>
+                  <select id="maxColors">
+                    <option value="12">12 色</option>
+                    <option value="18">18 色</option>
+                    <option value="24" selected>24 色</option>
+                    <option value="36">36 色</option>
+                    <option value="48">48 色</option>
+                    <option value="64">64 色</option>
+                  </select>
+                </label>
+                <label class="toggle-field">
+                  <span><b>透明区域留空</b><small>适用于带透明背景的 PNG</small></span>
+                  <input id="keepTransparent" type="checkbox" checked />
+                </label>
+              </div>
+            </div>
+
+            <div class="control-section palette-section">
+              <button class="section-title" type="button" aria-expanded="true">
+                <span><em>3</em> 调整颜色</span><i>⌃</i>
+              </button>
+              <div class="section-body">
+                <p class="hint">选择一个颜色，再点击图纸中的豆子即可手动修正。</p>
+                <div class="palette-list" id="paletteList"></div>
+              </div>
+            </div>
+          </aside>
+
+          <section class="preview-panel" aria-label="图纸预览">
+            <div class="preview-toolbar">
+              <div class="view-tabs" role="tablist" aria-label="预览类型">
+                <button class="active" id="resultTab" type="button" role="tab" aria-selected="true">图纸</button>
+                <button id="originalTab" type="button" role="tab" aria-selected="false">原图</button>
+              </div>
+              <div class="toolbar-actions">
+                <button id="undoButton" type="button" disabled aria-label="撤销">↶</button>
+                <button id="redoButton" type="button" disabled aria-label="重做">↷</button>
+                <span class="divider"></span>
+                <button id="zoomOut" type="button" aria-label="缩小">−</button>
+                <output id="zoomValue">100%</output>
+                <button id="zoomIn" type="button" aria-label="放大">＋</button>
+              </div>
+            </div>
+            <div class="canvas-stage" id="canvasStage">
+              <div class="processing" id="processing" hidden>
+                <span class="spinner"></span>
+                <b>正在整理每一颗豆子…</b>
+              </div>
+              <canvas id="patternCanvas" aria-label="生成的拼豆图纸"></canvas>
+              <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
+            </div>
+            <div class="statusbar">
+              <span><i class="status-dot"></i><b id="gridStatus">—</b></span>
+              <span><b id="colorStatus">—</b></span>
+              <span class="confidence" id="confidenceStatus">等待图片</span>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="helpDialog" class="modal">
+      <form method="dialog">
+        <button class="modal-close" aria-label="关闭">×</button>
+        <p class="eyebrow">快速上手</p>
+        <h2>怎样得到更准确的图纸？</h2>
+        <ol>
+          <li><b>先看网格。</b>如果豆子错位，手动修改行列数；原图带白边时先用裁切去掉。</li>
+          <li><b>再看颜色。</b>压缩严重时提高“去杂色”，颜色太多时提高“近似色合并”。</li>
+          <li><b>最后修正。</b>在颜色表选中颜色，直接点图纸中的单颗豆子。</li>
+        </ol>
+        <div class="notice">处理全程发生在你的浏览器里。刷新或关闭页面后，原图和图纸不会被保存在服务器。</div>
+        <button class="primary-button full" value="close">知道了</button>
+      </form>
+    </dialog>
+
+    <dialog id="exportDialog" class="modal export-modal">
+      <form method="dialog">
+        <button class="modal-close" aria-label="关闭">×</button>
+        <p class="eyebrow">导出图纸</p>
+        <h2>选择你需要的格式</h2>
+        <div class="export-options">
+          <button type="button" data-export="png"><span>PNG</span><b>高清图纸</b><small>含网格编号和色号表</small></button>
+          <button type="button" data-export="csv"><span>CSV</span><b>色号矩阵</b><small>可用表格软件继续编辑</small></button>
+          <button type="button" data-export="json"><span>JSON</span><b>工程数据</b><small>保留颜色、数量和网格</small></button>
+          <button type="button" data-export="print"><span>PDF</span><b>打印 / 存 PDF</b><small>使用浏览器打印功能</small></button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js?v=6"></script>
+  </body>
+</html>

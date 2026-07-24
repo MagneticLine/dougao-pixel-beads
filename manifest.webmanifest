@@ -1,0 +1,10 @@
+{
+  "name": "豆稿 · 像素图转拼豆图纸",
+  "short_name": "豆稿",
+  "description": "在浏览器本地把模糊像素图还原成清晰的拼豆图纸。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f1e7",
+  "theme_color": "#f6f1e7"
+}
