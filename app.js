@@ -50,6 +50,8 @@
     paletteSummary: $("#paletteSummary"),
     paletteList: $("#paletteList"),
     addPaletteButton: $("#addPaletteButton"),
+    resetPaletteButton: $("#resetPaletteButton"),
+    livePatternPreview: $(".live-pattern-preview"),
     livePatternCanvas: $("#livePatternCanvas"),
     livePreviewMeta: $("#livePreviewMeta"),
     colorPickBanner: $("#colorPickBanner"),
@@ -96,12 +98,16 @@
     detectedMode: "pixel",
     palette: [],
     detectedPaletteCount: 0,
+    detectedPaletteSnapshot: [],
     paletteEdited: false,
     cells: [],
     samples: [],
     confidences: [],
     selectedColor: 0,
     colorPickTarget: -1,
+    matchDrag: null,
+    previewDrag: null,
+    previewPosition: null,
     zoom: 1,
     sourceZoom: 1,
     view: "result",
@@ -567,12 +573,19 @@
       suggestPhotoFrame();
       state.palette = [];
       state.detectedPaletteCount = 0;
+      state.detectedPaletteSnapshot = [];
       state.paletteEdited = false;
       state.cells = [];
       state.samples = [];
       state.confidences = [];
       state.selectedColor = 0;
       state.colorPickTarget = -1;
+      state.matchDrag = null;
+      state.previewDrag = null;
+      state.previewPosition = null;
+      elements.livePatternPreview.style.removeProperty("left");
+      elements.livePatternPreview.style.removeProperty("top");
+      elements.livePatternPreview.style.removeProperty("right");
       state.history = [];
       state.future = [];
       elements.fileName.textContent = state.fileName;
@@ -773,8 +786,8 @@
     canvas.setAttribute(
       "aria-label",
       picking
-        ? `正在为图纸颜色 ${state.palette[state.colorPickTarget].code} 吸取匹配色；点击原图中的目标颜色`
-        : `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度；拖动图片可移动，只有角点会调整框选`,
+        ? `正在为图纸颜色 ${state.palette[state.colorPickTarget].name} 吸取匹配色；点击原图中的目标颜色`
+        : `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度；框内拖动整个框，框外拖动图片，角点调整边界`,
     );
     canvas.dataset.panX = state.sourcePan.x.toFixed(4);
     canvas.dataset.panY = state.sourcePan.y.toFixed(4);
@@ -924,8 +937,9 @@
         nearest = distance;
       }
     });
+    const inside = pointInsideFrame(point);
     state.frameDrag = {
-      type: corner >= 0 ? "corner" : "pan",
+      type: corner >= 0 ? "corner" : inside ? "frame" : "pan",
       corner,
       start: { x: point.x, y: point.y },
       initial: state.frame.map((framePoint) => ({ ...framePoint })),
@@ -954,7 +968,13 @@
         }
       });
       elements.sourceCanvas.style.cursor =
-        corner < 0 ? "grab" : corner % 2 === 0 ? "nwse-resize" : "nesw-resize";
+        corner >= 0
+          ? corner % 2 === 0
+            ? "nwse-resize"
+            : "nesw-resize"
+          : pointInsideFrame(point)
+            ? "move"
+            : "grab";
       return;
     }
     const drag = state.frameDrag;
@@ -978,6 +998,20 @@
         next[drag.corner] = { x: point.x, y: point.y };
         if (frameIsConvex(next)) state.frame = next;
       }
+      syncCropFromFrame();
+    } else if (drag.type === "frame") {
+      const desiredX = point.x - drag.start.x;
+      const desiredY = point.y - drag.start.y;
+      const minX = Math.min(...drag.initial.map((framePoint) => framePoint.x));
+      const maxX = Math.max(...drag.initial.map((framePoint) => framePoint.x));
+      const minY = Math.min(...drag.initial.map((framePoint) => framePoint.y));
+      const maxY = Math.max(...drag.initial.map((framePoint) => framePoint.y));
+      const deltaX = clamp(desiredX, -minX, 1 - maxX);
+      const deltaY = clamp(desiredY, -minY, 1 - maxY);
+      state.frame = drag.initial.map((framePoint) => ({
+        x: framePoint.x + deltaX,
+        y: framePoint.y + deltaY,
+      }));
       syncCropFromFrame();
     } else {
       const deltaX = point.x - drag.start.x;
@@ -1498,7 +1532,12 @@
         const hueB = Math.atan2(b.lab.b, b.lab.a);
         return hueA - hueB || b.lab.l - a.lab.l;
       })
-      .map((color, index) => ({ ...color, code: makeCode(index) }));
+      .map((color, index) => ({
+        ...color,
+        name: makeCode(index),
+        code: rgbToHex(color),
+        codeCustomized: false,
+      }));
   }
 
   function makeCode(index) {
@@ -1506,15 +1545,26 @@
     return `${letter}${Math.floor(index / 26) + 1}`;
   }
 
-  function makeAvailableCode(ignoreIndex = -1) {
+  function makeAvailableName(ignoreIndex = -1) {
     const used = new Set(
       state.palette
         .filter((_, index) => index !== ignoreIndex)
-        .map((color) => String(color.code || "").trim().toUpperCase()),
+        .map((color) => String(color.name || "").trim().toUpperCase()),
     );
     let index = 0;
     while (used.has(makeCode(index))) index += 1;
     return makeCode(index);
+  }
+
+  function clonePalette(palette) {
+    return palette.map((color) => ({
+      ...color,
+      lab: { ...color.lab },
+      matches: (color.matches || []).map((match) => ({
+        ...match,
+        lab: { ...match.lab },
+      })),
+    }));
   }
 
   function nearestColorIndex(color, palette) {
@@ -1641,7 +1691,8 @@
     try {
       const { samples, confidences } = sampleCells();
       const keepingEdits = preservePalette && state.paletteEdited;
-      const palette = keepingEdits ? state.palette : clusterPalette(samples);
+      const detectedPalette = clusterPalette(samples);
+      const palette = keepingEdits ? state.palette : detectedPalette;
       if (!palette.length && !keepingEdits) {
         showToast("裁切区域几乎完全透明，请调整裁切或关闭透明留空");
         return;
@@ -1651,8 +1702,9 @@
       if (token !== state.processingToken) return;
 
       state.palette = palette;
+      state.detectedPaletteCount = detectedPalette.length;
+      state.detectedPaletteSnapshot = clonePalette(detectedPalette);
       if (!keepingEdits) {
-        state.detectedPaletteCount = palette.length;
         state.paletteEdited = false;
       }
       state.cells = cells;
@@ -1725,7 +1777,7 @@
           ctx.font = `700 ${Math.max(8, Math.floor(cell * 0.36))}px Arial, "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.code, Math.round(x + cell / 2), Math.round(y + cell / 2));
+          ctx.fillText(color.name, Math.round(x + cell / 2), Math.round(y + cell / 2));
         } else if (cell >= 10) {
           ctx.fillStyle = textColor(color);
           ctx.globalAlpha = 0.52;
@@ -1784,7 +1836,7 @@
   function renderPalette() {
     elements.paletteList.replaceChildren();
     elements.paletteSummary.textContent = state.detectedPaletteCount
-      ? `算法先分出了 ${state.detectedPaletteCount} 种颜色；可在下方改图纸用色、色号和原图匹配色。`
+      ? `算法先分出了 ${state.detectedPaletteCount} 种颜色；可改图纸用色和色号，也可把原图颜色标签拖到其他颜色。`
       : "当前没有可用颜色；可先添加图纸颜色，再从原图吸取匹配色。";
     const fragment = document.createDocumentFragment();
     state.palette.forEach((color, index) => {
@@ -1804,14 +1856,15 @@
       colorInput.type = "color";
       colorInput.value = rgbToHex(color);
       colorInput.dataset.action = "target-color";
-      colorInput.setAttribute("aria-label", `修改 ${color.code} 的图纸颜色`);
+      colorInput.setAttribute("aria-label", `修改 ${color.name} 的图纸颜色`);
       const targetMeta = document.createElement("span");
-      const targetHex = document.createElement("b");
-      targetHex.className = "target-hex";
-      targetHex.textContent = rgbToHex(color);
-      const targetCount = document.createElement("small");
-      targetCount.textContent = `${color.count} 颗`;
-      targetMeta.append(targetHex, targetCount);
+      const targetName = document.createElement("b");
+      targetName.className = "target-name";
+      targetName.textContent = color.name;
+      const targetDetails = document.createElement("small");
+      targetDetails.className = "target-details";
+      targetDetails.textContent = `${rgbToHex(color)} · ${color.count} 颗`;
+      targetMeta.append(targetName, targetDetails);
       targetColorRow.append(colorInput, targetMeta);
 
       const codeLabel = document.createElement("label");
@@ -1823,7 +1876,7 @@
       codeInput.value = color.code;
       codeInput.maxLength = 12;
       codeInput.dataset.action = "color-code";
-      codeInput.setAttribute("aria-label", `修改图纸颜色 ${color.code} 的色号`);
+      codeInput.setAttribute("aria-label", `修改图纸颜色 ${color.name} 的色号`);
       codeLabel.append(codeCaption, codeInput);
       target.append(targetHeading, targetColorRow, codeLabel);
 
@@ -1838,7 +1891,7 @@
       pickButton.type = "button";
       pickButton.dataset.action = "pick-match";
       pickButton.textContent = "吸取";
-      pickButton.setAttribute("aria-label", `从原图为 ${color.code} 吸取匹配颜色`);
+      pickButton.setAttribute("aria-label", `从原图为 ${color.name} 吸取匹配颜色`);
       matchesHeader.append(matchesHeading, pickButton);
 
       const matchList = document.createElement("div");
@@ -1853,6 +1906,8 @@
         matches.forEach((match, matchIndex) => {
           const chip = document.createElement("span");
           chip.className = "match-color-chip";
+          chip.dataset.paletteIndex = String(index);
+          chip.dataset.matchIndex = String(matchIndex);
           chip.title = `原图颜色 ${rgbToHex(match)}`;
           const dot = document.createElement("i");
           dot.style.background = colorCss(match);
@@ -1875,13 +1930,15 @@
       removeEntry.className = "palette-remove";
       removeEntry.dataset.action = "remove-entry";
       removeEntry.textContent = "删除";
-      removeEntry.setAttribute("aria-label", `删除图纸颜色 ${color.code}`);
+      removeEntry.setAttribute("aria-label", `删除图纸颜色 ${color.name}`);
 
       card.append(target, sourceMatches, removeEntry);
       fragment.append(card);
     });
     elements.paletteList.append(fragment);
     elements.addPaletteButton.textContent = `＋ 添加图纸颜色（当前 ${state.palette.length} 项）`;
+    elements.resetPaletteButton.disabled =
+      !state.paletteEdited || !state.detectedPaletteSnapshot.length;
   }
 
   function renderLivePatternPreview() {
@@ -1950,6 +2007,66 @@
     elements.livePreviewMeta.textContent = `${state.cols} × ${state.rows} · ${usedColors} 色`;
   }
 
+  function setLivePreviewPosition(x, y) {
+    const preview = elements.livePatternPreview;
+    const editor = elements.sourceEditor;
+    const maxX = Math.max(6, editor.clientWidth - preview.offsetWidth - 6);
+    const maxY = Math.max(6, editor.clientHeight - preview.offsetHeight - 6);
+    state.previewPosition = {
+      x: clamp(x, 6, maxX),
+      y: clamp(y, 6, maxY),
+    };
+    preview.style.right = "auto";
+    preview.style.left = `${state.previewPosition.x}px`;
+    preview.style.top = `${state.previewPosition.y}px`;
+  }
+
+  function clampLivePreviewPosition() {
+    if (!state.previewPosition || elements.sourceEditor.hidden) return;
+    setLivePreviewPosition(state.previewPosition.x, state.previewPosition.y);
+  }
+
+  function startLivePreviewDrag(event) {
+    if (event.button > 0) return;
+    const previewRect = elements.livePatternPreview.getBoundingClientRect();
+    const editorRect = elements.sourceEditor.getBoundingClientRect();
+    const left = previewRect.left - editorRect.left;
+    const top = previewRect.top - editorRect.top;
+    setLivePreviewPosition(left, top);
+    state.previewDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      initialX: state.previewPosition.x,
+      initialY: state.previewPosition.y,
+    };
+    elements.livePatternPreview.classList.add("dragging");
+    elements.livePatternPreview.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function moveLivePreviewDrag(event) {
+    const drag = state.previewDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setLivePreviewPosition(
+      drag.initialX + event.clientX - drag.startX,
+      drag.initialY + event.clientY - drag.startY,
+    );
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function finishLivePreviewDrag(event) {
+    const drag = state.previewDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    state.previewDrag = null;
+    elements.livePatternPreview.classList.remove("dragging");
+    elements.livePatternPreview.releasePointerCapture?.(event.pointerId);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   function renderStatus() {
     const filled = state.cells.filter((cell) => cell >= 0).length;
     const usedColors = state.palette.filter((color) => color.count > 0).length;
@@ -2002,7 +2119,12 @@
     elements.originalTab.setAttribute("aria-selected", String(!result));
     elements.zoomValue.value = `${Math.round((result ? state.zoom : state.sourceZoom) * 100)}%`;
     if (result) sizeSourceEditor();
-    else requestAnimationFrame(drawSourceThumb);
+    else {
+      requestAnimationFrame(() => {
+        drawSourceThumb();
+        clampLivePreviewPosition();
+      });
+    }
   }
 
   function updateZoom(next) {
@@ -2095,14 +2217,10 @@
   function normalizeColorCode(value, index) {
     const cleaned = String(value || "")
       .trim()
-      .replace(/[\s,]+/g, "")
+      .replace(/[\r\n,]+/g, " ")
       .slice(0, 12)
       .toUpperCase();
-    const duplicate = state.palette.some(
-      (color, colorIndex) =>
-        colorIndex !== index && String(color.code || "").toUpperCase() === cleaned,
-    );
-    return cleaned && !duplicate ? cleaned : makeAvailableCode(index);
+    return cleaned || rgbToHex(state.palette[index]);
   }
 
   function updateColorPickUi() {
@@ -2112,10 +2230,10 @@
     elements.colorPickBanner.hidden = !active;
     if (active) {
       const color = state.palette[state.colorPickTarget];
-      elements.colorPickLabel.textContent = `正在为 ${color.code} 吸取原图颜色`;
+      elements.colorPickLabel.textContent = `正在为 ${color.name} 吸取原图颜色`;
       elements.sourceCanvas.setAttribute(
         "aria-label",
-        `正在为图纸颜色 ${color.code} 吸取匹配色；点击原图中的目标颜色，按 Escape 取消`,
+        `正在为图纸颜色 ${color.name} 吸取匹配色；点击原图中的目标颜色，按 Escape 取消`,
       );
     }
   }
@@ -2135,7 +2253,7 @@
     updateView();
     updateColorPickUi();
     drawSourceThumb();
-    showToast(`请点击原图，为 ${state.palette[index].code} 吸取匹配颜色`);
+    showToast(`请点击原图，为 ${state.palette[index].name} 吸取匹配颜色`);
   }
 
   function sampleSourceColorAt(point) {
@@ -2187,10 +2305,10 @@
       showToast("这里接近透明，请点击有颜色的位置");
       return true;
     }
-    const code = state.palette[target].code;
+    const name = state.palette[target].name;
     addPaletteMatch(target, match);
     cancelColorPick();
-    showToast(`${rgbToHex(match)} 已匹配到 ${code}`);
+    showToast(`${rgbToHex(match)} 已匹配到 ${name}`);
     return true;
   }
 
@@ -2199,13 +2317,16 @@
     const rgb = selected
       ? { r: selected.r, g: selected.g, b: selected.b }
       : { r: 239, g: 236, b: 225 };
-    state.palette.push({
+    const entry = {
       ...rgb,
       lab: rgbToLab(rgb),
       count: 0,
-      code: makeAvailableCode(),
+      name: makeAvailableName(),
+      code: rgbToHex(rgb),
+      codeCustomized: false,
       matches: [],
-    });
+    };
+    state.palette.push(entry);
     state.selectedColor = state.palette.length - 1;
     state.paletteEdited = true;
     renderAll();
@@ -2213,13 +2334,13 @@
 
   function removePaletteEntry(index) {
     if (!state.palette[index]) return;
-    const code = state.palette[index].code;
+    const name = state.palette[index].name;
     cancelColorPick({ redraw: false });
     state.palette.splice(index, 1);
     state.selectedColor = clamp(index, 0, Math.max(0, state.palette.length - 1));
     state.paletteEdited = true;
     remapCellsFromPaletteMatches();
-    showToast(`已删除图纸颜色 ${code}`);
+    showToast(`已删除图纸颜色 ${name}`);
   }
 
   function removePaletteMatch(index, matchIndex) {
@@ -2229,6 +2350,109 @@
     state.selectedColor = index;
     state.paletteEdited = true;
     remapCellsFromPaletteMatches();
+  }
+
+  function resetPaletteMappings() {
+    if (!state.detectedPaletteSnapshot.length) {
+      showToast("当前没有可恢复的自动识别结果");
+      return;
+    }
+    cancelColorPick({ redraw: false });
+    state.palette = clonePalette(state.detectedPaletteSnapshot);
+    state.paletteEdited = false;
+    state.selectedColor = 0;
+    remapCellsFromPaletteMatches();
+    showToast("颜色匹配已恢复为自动识别结果");
+  }
+
+  function transferPaletteMatch(sourceIndex, matchIndex, targetIndex) {
+    const source = state.palette[sourceIndex];
+    const target = state.palette[targetIndex];
+    const match = source?.matches?.[matchIndex];
+    if (!source || !target || !match || sourceIndex === targetIndex) return;
+    source.matches.splice(matchIndex, 1);
+    const transferThreshold = 2.5;
+    state.palette.forEach((entry) => {
+      entry.matches = (entry.matches || []).filter(
+        (existing) => labDistance(existing.lab, match.lab) > transferThreshold,
+      );
+    });
+    target.matches.push(match);
+    state.selectedColor = targetIndex;
+    state.paletteEdited = true;
+    remapCellsFromPaletteMatches();
+    showToast(`${rgbToHex(match)} 已移到 ${target.name}`);
+  }
+
+  function cleanupMatchDrag() {
+    const drag = state.matchDrag;
+    if (!drag) return;
+    try {
+      drag.chip.releasePointerCapture?.(drag.pointerId);
+    } catch {
+      // The chip can be replaced after a successful drop.
+    }
+    drag.chip.classList.remove("dragging");
+    drag.ghost?.remove();
+    elements.paletteList
+      .querySelectorAll(".palette-mapping.drop-target")
+      .forEach((card) => card.classList.remove("drop-target"));
+    state.matchDrag = null;
+  }
+
+  function startMatchDrag(event) {
+    if (event.button > 0 || event.target.closest("button")) return;
+    const chip = event.target.closest(".match-color-chip");
+    if (!chip) return;
+    state.matchDrag = {
+      pointerId: event.pointerId,
+      sourceIndex: Number(chip.dataset.paletteIndex),
+      matchIndex: Number(chip.dataset.matchIndex),
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      chip,
+      ghost: null,
+      targetIndex: -1,
+    };
+    chip.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveMatchDrag(event) {
+    const drag = state.matchDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.active && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) {
+      return;
+    }
+    if (!drag.active) {
+      drag.active = true;
+      drag.chip.classList.add("dragging");
+      drag.ghost = drag.chip.cloneNode(true);
+      drag.ghost.className = "match-drag-ghost";
+      drag.ghost.querySelector("button")?.remove();
+      document.body.append(drag.ghost);
+    }
+    drag.ghost.style.transform = `translate(${event.clientX + 12}px, ${event.clientY + 12}px)`;
+    const targetCard = document.elementFromPoint(event.clientX, event.clientY)?.closest(".palette-mapping");
+    drag.targetIndex = targetCard ? Number(targetCard.dataset.index) : -1;
+    elements.paletteList.querySelectorAll(".palette-mapping").forEach((card) => {
+      card.classList.toggle(
+        "drop-target",
+        card === targetCard && drag.targetIndex !== drag.sourceIndex,
+      );
+    });
+    event.preventDefault();
+  }
+
+  function finishMatchDrag(event) {
+    const drag = state.matchDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const { active, sourceIndex, matchIndex, targetIndex } = drag;
+    cleanupMatchDrag();
+    if (active && targetIndex >= 0 && targetIndex !== sourceIndex) {
+      transferPaletteMatch(sourceIndex, matchIndex, targetIndex);
+      event.preventDefault();
+    }
   }
 
   function downloadBlob(blob, extension) {
@@ -2274,7 +2498,7 @@
           ctx.font = `700 ${Math.max(8, Math.floor(cell * 0.34))}px system-ui`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.code, x + cell / 2, y + cell / 2);
+          ctx.fillText(color.name, x + cell / 2, y + cell / 2);
         }
       }
     }
@@ -2316,10 +2540,12 @@
       ctx.strokeRect(legendX + 0.5, y - 15.5, 19, 19);
       ctx.fillStyle = "#20231f";
       ctx.font = "700 12px system-ui";
-      ctx.fillText(color.code, legendX + 29, y);
+      ctx.fillText(color.name, legendX + 29, y);
       ctx.fillStyle = "#70746c";
       ctx.font = "11px system-ui";
-      ctx.fillText(`${rgbToHex(color)}  ·  ${color.count} 颗`, legendX + 61, y);
+      const hex = rgbToHex(color);
+      const reference = color.code === hex ? hex : `${color.code} · ${hex}`;
+      ctx.fillText(`${reference} · ${color.count} 颗`, legendX + 61, y);
     });
     return canvas;
   }
@@ -2344,15 +2570,17 @@
       const values = [row + 1];
       for (let col = 0; col < state.cols; col += 1) {
         const cell = state.cells[row * state.cols + col];
-        values.push(cell < 0 ? "" : state.palette[cell].code);
+        values.push(cell < 0 ? "" : state.palette[cell].name);
       }
       rows.push(values.join(","));
     }
     rows.push("");
-    rows.push("色号,HEX,数量");
+    rows.push("名称,色号,HEX,数量");
     state.palette
       .filter((color) => color.count)
-      .forEach((color) => rows.push(`${color.code},${rgbToHex(color)},${color.count}`));
+      .forEach((color) =>
+        rows.push(`${color.name},${color.code},${rgbToHex(color)},${color.count}`),
+      );
     downloadBlob(new Blob([`\uFEFF${rows.join("\r\n")}`], { type: "text/csv;charset=utf-8" }), "csv");
     safeCloseModal(elements.exportDialog);
     showToast("CSV 色号矩阵已下载");
@@ -2361,18 +2589,24 @@
   function exportJson() {
     const data = {
       format: "dougao-pattern",
-      version: 1,
+      version: 2,
       name: state.fileName,
       width: state.cols,
       height: state.rows,
       totalBeads: state.cells.filter((cell) => cell >= 0).length,
       palette: state.palette
-        .map((color, index) => ({ index, code: color.code, hex: rgbToHex(color), count: color.count }))
+        .map((color, index) => ({
+          index,
+          name: color.name,
+          code: color.code,
+          hex: rgbToHex(color),
+          count: color.count,
+        }))
         .filter((color) => color.count),
       cells: Array.from({ length: state.rows }, (_, row) =>
         Array.from({ length: state.cols }, (_, col) => {
           const cell = state.cells[row * state.cols + col];
-          return cell < 0 ? null : state.palette[cell].code;
+          return cell < 0 ? null : state.palette[cell].name;
         }),
       ),
     };
@@ -2576,6 +2810,10 @@
       });
     });
 
+    elements.paletteList.addEventListener("pointerdown", startMatchDrag);
+    elements.paletteList.addEventListener("pointermove", moveMatchDrag);
+    elements.paletteList.addEventListener("pointerup", finishMatchDrag);
+    elements.paletteList.addEventListener("pointercancel", cleanupMatchDrag);
     elements.paletteList.addEventListener("click", (event) => {
       const card = event.target.closest(".palette-mapping");
       if (!card) return;
@@ -2602,14 +2840,24 @@
       if (event.target.dataset.action === "target-color") {
         const rgb = hexToRgb(event.target.value);
         if (!rgb) return;
+        const previousHex = rgbToHex(color);
         Object.assign(color, rgb);
+        if (!color.codeCustomized || color.code === previousHex) {
+          color.code = rgbToHex(color);
+          color.codeCustomized = false;
+          card.querySelector('[data-action="color-code"]').value = color.code;
+        }
         state.paletteEdited = true;
-        card.querySelector(".target-hex").textContent = rgbToHex(color);
+        elements.resetPaletteButton.disabled = !state.detectedPaletteSnapshot.length;
+        card.querySelector(".target-details").textContent =
+          `${rgbToHex(color)} · ${color.count} 颗`;
         renderPattern();
         renderLivePatternPreview();
       } else if (event.target.dataset.action === "color-code") {
         color.code = event.target.value.slice(0, 12);
+        color.codeCustomized = true;
         state.paletteEdited = true;
+        elements.resetPaletteButton.disabled = !state.detectedPaletteSnapshot.length;
         renderPattern();
       }
     });
@@ -2621,10 +2869,12 @@
       const color = state.palette[index];
       if (!color) return;
       color.code = normalizeColorCode(event.target.value, index);
+      color.codeCustomized = color.code !== rgbToHex(color);
       event.target.value = color.code;
       renderPattern();
     });
     elements.addPaletteButton.addEventListener("click", addPaletteEntry);
+    elements.resetPaletteButton.addEventListener("click", resetPaletteMappings);
     elements.cancelColorPickButton.addEventListener("click", () => cancelColorPick());
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && state.colorPickTarget >= 0) {
@@ -2633,6 +2883,10 @@
       }
     });
     elements.patternCanvas.addEventListener("click", editCell);
+    elements.livePatternPreview.addEventListener("pointerdown", startLivePreviewDrag);
+    elements.livePatternPreview.addEventListener("pointermove", moveLivePreviewDrag);
+    elements.livePatternPreview.addEventListener("pointerup", finishLivePreviewDrag);
+    elements.livePatternPreview.addEventListener("pointercancel", finishLivePreviewDrag);
     elements.undoButton.addEventListener("click", undo);
     elements.redoButton.addEventListener("click", redo);
     elements.zoomOut.addEventListener("click", () => {
@@ -2675,6 +2929,7 @@
         if (!state.image) return;
         sizeSourceEditor();
         drawSourceThumb();
+        clampLivePreviewPosition();
       }, 120),
     );
     window.addEventListener("focus", detectGrantedClipboardImage);
@@ -2697,7 +2952,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=22").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=23").catch(() => {});
     }
     window.addEventListener(
       "load",

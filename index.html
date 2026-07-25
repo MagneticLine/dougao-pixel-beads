@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=22" />
-    <link rel="stylesheet" href="./styles.css?v=22" />
+    <link rel="manifest" href="./manifest.webmanifest?v=23" />
+    <link rel="stylesheet" href="./styles.css?v=23" />
   </head>
   <body>
     <header class="topbar">
@@ -176,7 +176,10 @@
                   <span>匹配的原图颜色</span>
                 </div>
                 <div class="palette-list" id="paletteList"></div>
-                <button class="palette-add-button" id="addPaletteButton" type="button">＋ 添加图纸颜色</button>
+                <div class="palette-actions">
+                  <button class="palette-add-button" id="addPaletteButton" type="button">＋ 添加图纸颜色</button>
+                  <button class="palette-reset-button" id="resetPaletteButton" type="button">重置颜色匹配</button>
+                </div>
                 <p class="hint">点选一项后仍可直接点击图纸中的豆子，进行单格修正。</p>
               </div>
             </div>
@@ -207,9 +210,9 @@
                 <canvas
                   id="sourceCanvas"
                   tabindex="0"
-                  aria-label="大图网格校准；拖动图片可移动，只有拖动四个角点才会调整框选"
+                  aria-label="大图网格校准；框内拖动整个框，框外拖动图片，四个角点调整框选"
                 ></canvas>
-                <div class="editor-tip"><b>拖动图片对齐网格</b><span>只有四个角点会调整框选 · 网格实时更新</span></div>
+                <div class="editor-tip"><b>框内拖动整个框</b><span>框外拖动图片 · 四个角点调整边界</span></div>
                 <div class="color-pick-banner" id="colorPickBanner" hidden>
                   <span>
                     <b id="colorPickLabel">正在吸取原图颜色</b>
@@ -220,7 +223,7 @@
                 <aside class="live-pattern-preview" aria-label="实时图纸预览">
                   <header><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></header>
                   <div><canvas id="livePatternCanvas" aria-label="随校准结果更新的拼豆图纸预览"></canvas></div>
-                  <p>松开拖动后自动更新</p>
+                  <p>拖动悬浮窗可移动 · 松开校准后更新</p>
                 </aside>
               </div>
               <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
@@ -262,7 +265,7 @@
                   <li><b>先在大图上框边缘。</b>“矩形”模式适合绝大多数图片；只有明显透视时才切到“自由四角”。</li>
                   <li><b>再看网格和水平。</b>滚轮调整行列数，拖动图片下方的旋转滑杆，让格线穿过每颗豆之间的缝隙。</li>
                   <li><b>然后看颜色。</b>实物照片会避开中心孔和反光取色；颜色太多时提高“近似色合并”。</li>
-                  <li><b>最后修正。</b>在颜色表改图纸用色和色号，或从原图吸取颜色重新匹配；也可直接点图纸修正单颗豆子。</li>
+                  <li><b>最后修正。</b>在颜色表改图纸用色和色号，吸取或拖动原图颜色重新匹配；误操作可一键重置。</li>
         </ol>
         <div class="notice">处理全程发生在你的浏览器里。刷新或关闭页面后，原图和图纸不会被保存在服务器。</div>
         <button class="primary-button full" value="close">知道了</button>
@@ -284,6 +287,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=22"></script>
+    <script src="./app.js?v=23"></script>
   </body>
 </html>

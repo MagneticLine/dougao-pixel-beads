@@ -1004,6 +1004,12 @@ body.editing main {
   box-shadow: inset 0 0 0 1px rgba(66, 124, 164, 0.42);
 }
 
+.palette-mapping.drop-target {
+  border-color: var(--mint);
+  background: rgba(110, 183, 148, 0.1);
+  box-shadow: inset 0 0 0 2px rgba(77, 155, 124, 0.28);
+}
+
 .palette-target,
 .palette-matches {
   display: grid;
@@ -1128,7 +1134,18 @@ body.editing main {
   background: #faf9f5;
   grid-template-columns: 13px minmax(0, 1fr) 17px;
   align-items: center;
+  cursor: grab;
   gap: 4px;
+  touch-action: none;
+  user-select: none;
+}
+
+.match-color-chip:active {
+  cursor: grabbing;
+}
+
+.match-color-chip.dragging {
+  opacity: 0.28;
 }
 
 .match-color-chip > i {
@@ -1185,17 +1202,67 @@ body.editing main {
   font-size: 8px;
 }
 
-.palette-add-button {
-  width: 100%;
-  min-height: 34px;
+.palette-actions {
+  display: grid;
   margin-top: 9px;
-  border: 1px dashed rgba(66, 124, 164, 0.42);
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: 7px;
+}
+
+.palette-add-button,
+.palette-reset-button {
+  min-height: 34px;
   border-radius: 9px;
-  color: var(--blue);
-  background: rgba(66, 124, 164, 0.05);
   cursor: pointer;
   font-size: 10px;
   font-weight: 800;
+}
+
+.palette-add-button {
+  border: 1px dashed rgba(66, 124, 164, 0.42);
+  color: var(--blue);
+  background: rgba(66, 124, 164, 0.05);
+}
+
+.palette-reset-button {
+  border: 1px solid var(--line);
+  color: #7d6d62;
+  background: #f5f2eb;
+}
+
+.palette-reset-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.match-drag-ghost {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  left: 0;
+  display: grid;
+  height: 29px;
+  padding: 0 7px;
+  border: 1px solid rgba(66, 124, 164, 0.5);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 10px 26px rgba(27, 33, 30, 0.24);
+  grid-template-columns: 14px auto;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.match-drag-ghost > i {
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 4px;
+}
+
+.match-drag-ghost > b {
+  color: var(--ink);
+  font-size: 8px;
 }
 
 .preview-panel {
@@ -1453,8 +1520,16 @@ body.editing main {
   background: rgba(255, 253, 248, 0.94);
   box-shadow: 0 12px 30px rgba(24, 28, 25, 0.22);
   backdrop-filter: blur(12px);
+  cursor: grab;
   gap: 8px;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.live-pattern-preview.dragging {
+  cursor: grabbing;
+  box-shadow: 0 17px 38px rgba(24, 28, 25, 0.3);
 }
 
 .live-pattern-preview header {
@@ -1960,12 +2035,41 @@ body.editing main {
 
   .preview-panel.source-active .canvas-stage,
   #sourceCanvas {
-    touch-action: pan-y pinch-zoom;
+    touch-action: none;
   }
 
   .live-pattern-preview {
     top: 52px;
     width: 150px;
+  }
+
+  .palette-list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .matches-header button {
+    min-height: 34px;
+  }
+
+  .match-color-chip {
+    height: 32px;
+    grid-template-columns: 16px minmax(0, 1fr) 24px;
+  }
+
+  .match-color-chip > i {
+    width: 16px;
+    height: 16px;
+  }
+
+  .match-color-chip button {
+    width: 24px;
+    height: 24px;
+  }
+
+  .palette-remove {
+    min-height: 28px;
+    font-size: 9px;
   }
 
   .controls {
@@ -2029,6 +2133,63 @@ body.editing main {
 
   .editor-tip span {
     display: none;
+  }
+
+  .palette-guide {
+    display: none;
+  }
+
+  .palette-mapping {
+    padding: 12px 11px 38px;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .palette-target {
+    padding: 0 0 12px;
+    border-right: 0;
+    border-bottom: 1px solid #ebe8e0;
+  }
+
+  .palette-code-field input {
+    height: 36px;
+    font-size: 12px;
+  }
+
+  .target-color-row input[type="color"] {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+  }
+
+  .palette-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .palette-add-button,
+  .palette-reset-button {
+    min-height: 42px;
+  }
+
+  .view-tabs button {
+    min-width: 56px;
+  }
+
+  .toolbar-actions button {
+    width: 28px;
+  }
+
+  .toolbar-actions output {
+    width: 38px;
+  }
+
+  .toolbar-actions .divider {
+    display: none;
+  }
+
+  .source-editor.color-picking .live-pattern-preview {
+    opacity: 0;
+    pointer-events: none;
   }
 
   .export-options {
