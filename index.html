@@ -16,7 +16,7 @@
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.webmanifest?v=23" />
-    <link rel="stylesheet" href="./styles.css?v=30" />
+    <link rel="stylesheet" href="./styles.css?v=31" />
   </head>
   <body>
     <header class="topbar">
@@ -220,19 +220,6 @@
                   </span>
                   <button id="cancelColorPickButton" type="button">取消</button>
                 </div>
-                <aside class="live-pattern-preview" aria-label="实时图纸预览">
-                  <header>
-                    <span><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></span>
-                    <button
-                      id="livePreviewToggle"
-                      type="button"
-                      aria-expanded="true"
-                      aria-label="收起实时图纸预览"
-                    >收起</button>
-                  </header>
-                  <div><canvas id="livePatternCanvas" aria-label="随校准结果更新的拼豆图纸预览"></canvas></div>
-                  <p>拖动悬浮窗可移动 · 松开校准后更新</p>
-                </aside>
               </div>
               <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
             </div>
@@ -263,6 +250,20 @@
         </div>
       </section>
     </main>
+
+    <aside class="live-pattern-preview" aria-label="实时图纸预览" hidden>
+      <header>
+        <span><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></span>
+        <button
+          id="livePreviewToggle"
+          type="button"
+          aria-expanded="true"
+          aria-label="收起实时图纸预览"
+        >收起</button>
+      </header>
+      <div><canvas id="livePatternCanvas" aria-label="随校准结果更新的拼豆图纸预览"></canvas></div>
+      <p>拖动标题栏可在网页内移动 · 松开校准后更新</p>
+    </aside>
 
     <dialog id="helpDialog" class="modal">
       <form method="dialog">
@@ -334,6 +335,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=30"></script>
+    <script src="./app.js?v=31"></script>
   </body>
 </html>

@@ -1533,27 +1533,26 @@ body.editing main {
 }
 
 .live-pattern-preview {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  right: 12px;
+  position: fixed;
+  z-index: 45;
+  top: calc(env(safe-area-inset-top, 0px) + 78px);
+  right: 18px;
   display: grid;
   width: clamp(160px, 19vw, 220px);
+  max-height: calc(100dvh - 24px);
   padding: 10px;
   border: 1px solid rgba(27, 31, 29, 0.2);
   border-radius: 14px;
   background: rgba(255, 253, 248, 0.94);
   box-shadow: 0 12px 30px rgba(24, 28, 25, 0.22);
   backdrop-filter: blur(12px);
-  cursor: grab;
   gap: 8px;
+  overflow: auto;
   pointer-events: auto;
-  touch-action: none;
   user-select: none;
 }
 
 .live-pattern-preview.dragging {
-  cursor: grabbing;
   box-shadow: 0 17px 38px rgba(24, 28, 25, 0.3);
 }
 
@@ -1562,7 +1561,13 @@ body.editing main {
   color: var(--ink);
   align-items: center;
   justify-content: space-between;
+  cursor: grab;
   gap: 8px;
+  touch-action: none;
+}
+
+.live-pattern-preview.dragging header {
+  cursor: grabbing;
 }
 
 .live-pattern-preview header span {
@@ -1596,7 +1601,7 @@ body.editing main {
 
 .live-pattern-preview > div {
   display: grid;
-  min-height: 108px;
+  min-height: 0;
   padding: 7px;
   border-radius: 9px;
   background: #dfdcd4;
@@ -1605,8 +1610,9 @@ body.editing main {
 
 #livePatternCanvas {
   display: block;
+  width: auto;
+  height: auto;
   max-width: 100%;
-  max-height: 220px;
   border: 1px solid rgba(31, 35, 32, 0.22);
   background: #fffefb;
   box-shadow: none;
@@ -1629,6 +1635,11 @@ body.editing main {
 .live-pattern-preview.collapsed > div,
 .live-pattern-preview.collapsed > p {
   display: none;
+}
+
+.live-pattern-preview.color-picking {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .calibration-bar {
@@ -2326,7 +2337,7 @@ body.editing main {
   }
 
   .live-pattern-preview {
-    top: 54px;
+    top: calc(env(safe-area-inset-top, 0px) + 62px);
     right: 8px;
     width: min(42vw, 150px);
     padding: 7px;
@@ -2335,7 +2346,6 @@ body.editing main {
   }
 
   .live-pattern-preview > div {
-    min-height: 86px;
     padding: 5px;
   }
 
@@ -2523,11 +2533,6 @@ body.editing main {
     display: none;
   }
 
-  .source-editor.color-picking .live-pattern-preview {
-    opacity: 0;
-    pointer-events: none;
-  }
-
   .export-options {
     grid-template-columns: 1fr;
   }
@@ -2546,7 +2551,8 @@ body.editing main {
   .work-head,
   .controls,
   .preview-toolbar,
-  .statusbar {
+  .statusbar,
+  .live-pattern-preview {
     display: none !important;
   }
 

@@ -742,14 +742,16 @@
 
     const strokeCalibrationGridLine = (start, end, major) => {
       ctx.shadowColor = "transparent";
-      ctx.strokeStyle = major ? "rgba(13, 17, 17, 0.9)" : "rgba(13, 17, 17, 0.76)";
-      ctx.lineWidth = (major ? 2.7 : 1.8) * dpr;
+      ctx.globalCompositeOperation = "difference";
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+      ctx.lineWidth = (major ? 1.65 : 1.05) * dpr;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
-      ctx.strokeStyle = major ? "rgba(255, 225, 77, 0.96)" : "rgba(255, 102, 80, 0.9)";
-      ctx.lineWidth = (major ? 1.35 : 0.78) * dpr;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = major ? "rgba(232, 22, 31, 0.98)" : "rgba(236, 28, 36, 0.9)";
+      ctx.lineWidth = (major ? 0.82 : 0.48) * dpr;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
@@ -777,14 +779,14 @@
     ctx.shadowColor = "transparent";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
-    ctx.strokeStyle = "rgba(4, 12, 16, 0.94)";
-    ctx.lineWidth = 6.5 * dpr;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.lineWidth = 1.8 * dpr;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.72)";
+    ctx.shadowBlur = 1.1 * dpr;
     traceFrame();
     ctx.stroke();
-    ctx.strokeStyle = "#19ddff";
-    ctx.lineWidth = 2.6 * dpr;
-    traceFrame();
-    ctx.stroke();
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
     frame.forEach((point, index) => {
       ctx.fillStyle = state.frameMode === "free" && index === 0 ? "#ff735f" : "#ffe34f";
       ctx.strokeStyle = "rgba(4, 12, 16, 0.96)";
@@ -2116,7 +2118,7 @@
       canvas.width = 1;
       canvas.height = 1;
       canvas.style.width = "1px";
-      canvas.style.height = "1px";
+      canvas.style.height = "auto";
       elements.livePreviewMeta.textContent = "等待识别";
       return;
     }
@@ -2130,7 +2132,7 @@
     canvas.width = Math.max(1, Math.round(logicalWidth * scale));
     canvas.height = Math.max(1, Math.round(logicalHeight * scale));
     canvas.style.width = `${Math.round(logicalWidth)}px`;
-    canvas.style.height = `${Math.round(logicalHeight)}px`;
+    canvas.style.height = "auto";
     const ctx = canvas.getContext("2d");
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.imageSmoothingEnabled = false;
@@ -2177,12 +2179,12 @@
 
   function setLivePreviewPosition(x, y) {
     const preview = elements.livePatternPreview;
-    const editor = elements.sourceEditor;
-    const maxX = Math.max(6, editor.clientWidth - preview.offsetWidth - 6);
-    const maxY = Math.max(6, editor.clientHeight - preview.offsetHeight - 6);
+    const inset = 8;
+    const maxX = Math.max(inset, window.innerWidth - preview.offsetWidth - inset);
+    const maxY = Math.max(inset, window.innerHeight - preview.offsetHeight - inset);
     state.previewPosition = {
-      x: clamp(x, 6, maxX),
-      y: clamp(y, 6, maxY),
+      x: clamp(x, inset, maxX),
+      y: clamp(y, inset, maxY),
     };
     preview.style.right = "auto";
     preview.style.left = `${state.previewPosition.x}px`;
@@ -2190,7 +2192,7 @@
   }
 
   function clampLivePreviewPosition() {
-    if (!state.previewPosition || elements.sourceEditor.hidden) return;
+    if (!state.previewPosition || elements.livePatternPreview.hidden) return;
     setLivePreviewPosition(state.previewPosition.x, state.previewPosition.y);
   }
 
@@ -2210,12 +2212,9 @@
   }
 
   function startLivePreviewDrag(event) {
-    if (event.button > 0 || event.target.closest("button")) return;
+    if (event.button > 0 || event.target.closest("button") || !event.target.closest("header")) return;
     const previewRect = elements.livePatternPreview.getBoundingClientRect();
-    const editorRect = elements.sourceEditor.getBoundingClientRect();
-    const left = previewRect.left - editorRect.left;
-    const top = previewRect.top - editorRect.top;
-    setLivePreviewPosition(left, top);
+    setLivePreviewPosition(previewRect.left, previewRect.top);
     state.previewDrag = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -2293,6 +2292,7 @@
     const result = state.view === "result";
     elements.patternCanvas.hidden = !result;
     elements.sourceEditor.hidden = result;
+    elements.livePatternPreview.hidden = result || !state.image;
     elements.originalCanvas.hidden = true;
     elements.calibrationBar.hidden = result;
     elements.previewPanel?.classList?.toggle("source-active", !result);
@@ -2544,6 +2544,7 @@
     const active =
       state.colorPickTarget >= 0 && Boolean(state.palette[state.colorPickTarget]);
     elements.sourceEditor.classList.toggle("color-picking", active);
+    elements.livePatternPreview.classList.toggle("color-picking", active);
     elements.colorPickBanner.hidden = !active;
     if (active) {
       const color = state.palette[state.colorPickTarget];
@@ -3238,9 +3239,9 @@
     });
     elements.patternCanvas.addEventListener("click", editCell);
     elements.livePatternPreview.addEventListener("pointerdown", startLivePreviewDrag);
-    elements.livePatternPreview.addEventListener("pointermove", moveLivePreviewDrag);
-    elements.livePatternPreview.addEventListener("pointerup", finishLivePreviewDrag);
-    elements.livePatternPreview.addEventListener("pointercancel", finishLivePreviewDrag);
+    window.addEventListener("pointermove", moveLivePreviewDrag);
+    window.addEventListener("pointerup", finishLivePreviewDrag);
+    window.addEventListener("pointercancel", finishLivePreviewDrag);
     elements.livePreviewToggle.addEventListener("click", (event) => {
       event.stopPropagation();
       setLivePreviewCollapsed(!state.livePreviewCollapsed);
@@ -3310,7 +3311,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=30").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
     }
     window.addEventListener(
       "load",
