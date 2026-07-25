@@ -24,6 +24,8 @@
     cropRight: $("#cropRight"),
     cropTop: $("#cropTop"),
     cropBottom: $("#cropBottom"),
+    sourceMode: $("#sourceMode"),
+    resetFrameButton: $("#resetFrameButton"),
     detectButton: $("#detectButton"),
     detectHint: $("#detectHint"),
     denoise: $("#denoise"),
@@ -57,6 +59,16 @@
     cols: 32,
     rows: 32,
     crop: { left: 0, right: 0, top: 0, bottom: 0 },
+    frame: [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+    ],
+    frameDrag: null,
+    sourceView: null,
+    sourcePixelCache: null,
+    detectedMode: "pixel",
     palette: [],
     cells: [],
     confidences: [],
@@ -78,6 +90,12 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  const defaultFrame = () => [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 1, y: 1 },
+    { x: 0, y: 1 },
+  ];
 
   function showToast(message) {
     elements.toast.textContent = message;
@@ -134,7 +152,7 @@
     elements.mergeValue.value = labels.merge[Number(elements.colorMerge.value)];
   }
 
-  function readCrop() {
+  function readCrop(syncFrame = false) {
     const crop = {
       left: clamp(Number(elements.cropLeft.value) || 0, 0, 45),
       right: clamp(Number(elements.cropRight.value) || 0, 0, 45),
@@ -147,22 +165,268 @@
     for (const side of ["Left", "Right", "Top", "Bottom"]) {
       elements[`crop${side}`].value = crop[side.toLowerCase()];
     }
+    if (syncFrame) {
+      const left = crop.left / 100;
+      const right = 1 - crop.right / 100;
+      const top = crop.top / 100;
+      const bottom = 1 - crop.bottom / 100;
+      state.frame = [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
+    }
     return crop;
+  }
+
+  function syncCropFromFrame() {
+    const xs = state.frame.map((point) => point.x);
+    const ys = state.frame.map((point) => point.y);
+    state.crop = {
+      left: clamp(Math.round(Math.min(...xs) * 1000) / 10, 0, 45),
+      right: clamp(Math.round((1 - Math.max(...xs)) * 1000) / 10, 0, 45),
+      top: clamp(Math.round(Math.min(...ys) * 1000) / 10, 0, 45),
+      bottom: clamp(Math.round((1 - Math.max(...ys)) * 1000) / 10, 0, 45),
+    };
+    for (const side of ["Left", "Right", "Top", "Bottom"]) {
+      elements[`crop${side}`].value = state.crop[side.toLowerCase()];
+    }
+  }
+
+  function getFramePixels() {
+    const width = state.image?.naturalWidth || 1;
+    const height = state.image?.naturalHeight || 1;
+    return state.frame.map((point) => ({ x: point.x * width, y: point.y * height }));
   }
 
   function getCropRect() {
     const { naturalWidth: width, naturalHeight: height } = state.image;
-    const crop = state.crop;
-    const x = Math.round((width * crop.left) / 100);
-    const y = Math.round((height * crop.top) / 100);
-    const right = Math.round((width * crop.right) / 100);
-    const bottom = Math.round((height * crop.bottom) / 100);
+    const xs = state.frame.map((point) => point.x * width);
+    const ys = state.frame.map((point) => point.y * height);
+    const x = Math.round(Math.min(...xs));
+    const y = Math.round(Math.min(...ys));
+    const right = Math.round(width - Math.max(...xs));
+    const bottom = Math.round(height - Math.max(...ys));
     return {
       x,
       y,
       width: Math.max(2, width - x - right),
       height: Math.max(2, height - y - bottom),
     };
+  }
+
+  function getSourcePixelData(maxSide = 1600) {
+    if (state.sourcePixelCache?.maxSide === maxSide) return state.sourcePixelCache;
+    const scale = Math.min(1, maxSide / Math.max(state.image.naturalWidth, state.image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, Math.round(state.image.naturalWidth * scale));
+    canvas.height = Math.max(2, Math.round(state.image.naturalHeight * scale));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+    state.sourcePixelCache = {
+      maxSide,
+      width: canvas.width,
+      height: canvas.height,
+      scaleX: canvas.width / state.image.naturalWidth,
+      scaleY: canvas.height / state.image.naturalHeight,
+      data: ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+    };
+    return state.sourcePixelCache;
+  }
+
+  function detectImageKind() {
+    const source = getSourcePixelData(240);
+    const buckets = new Set();
+    let softTransitions = 0;
+    let comparisons = 0;
+    const stepX = Math.max(1, Math.floor(source.width / 40));
+    const stepY = Math.max(1, Math.floor(source.height / 40));
+    for (let y = 0; y < source.height; y += stepY) {
+      for (let x = 0; x < source.width; x += stepX) {
+        const index = (y * source.width + x) * 4;
+        const color = [source.data[index], source.data[index + 1], source.data[index + 2]];
+        buckets.add(`${color[0] >> 3},${color[1] >> 3},${color[2] >> 3}`);
+        if (x >= stepX) {
+          const left = index - stepX * 4;
+          const difference =
+            Math.abs(color[0] - source.data[left]) +
+            Math.abs(color[1] - source.data[left + 1]) +
+            Math.abs(color[2] - source.data[left + 2]);
+          if (difference >= 3 && difference <= 42) softTransitions += 1;
+          comparisons += 1;
+        }
+        if (y >= stepY) {
+          const above = index - stepY * source.width * 4;
+          const difference =
+            Math.abs(color[0] - source.data[above]) +
+            Math.abs(color[1] - source.data[above + 1]) +
+            Math.abs(color[2] - source.data[above + 2]);
+          if (difference >= 3 && difference <= 42) softTransitions += 1;
+          comparisons += 1;
+        }
+      }
+    }
+    const softRatio = softTransitions / Math.max(1, comparisons);
+    return buckets.size > 230 || softRatio > 0.36 ? "photo" : "pixel";
+  }
+
+  function activeSourceMode() {
+    return elements.sourceMode.value === "auto" ? state.detectedMode : elements.sourceMode.value;
+  }
+
+  function suggestPhotoFrame() {
+    const source = getSourcePixelData(320);
+    const { width, height, data } = source;
+    const cornerSize = Math.max(3, Math.round(Math.min(width, height) * 0.035));
+    let background = { r: 0, g: 0, b: 0, count: 0 };
+    for (const [startX, startY] of [
+      [0, 0],
+      [width - cornerSize, 0],
+      [0, height - cornerSize],
+      [width - cornerSize, height - cornerSize],
+    ]) {
+      for (let y = startY; y < startY + cornerSize; y += 1) {
+        for (let x = startX; x < startX + cornerSize; x += 1) {
+          const index = (y * width + x) * 4;
+          background.r += data[index];
+          background.g += data[index + 1];
+          background.b += data[index + 2];
+          background.count += 1;
+        }
+      }
+    }
+    background.r /= background.count;
+    background.g /= background.count;
+    background.b /= background.count;
+
+    const mask = new Uint8Array(width * height);
+    for (let y = 1; y < height - 1; y += 1) {
+      for (let x = 1; x < width - 1; x += 1) {
+        const index = (y * width + x) * 4;
+        const r = data[index];
+        const g = data[index + 1];
+        const b = data[index + 2];
+        const saturation = Math.max(r, g, b) - Math.min(r, g, b);
+        const backgroundDistance =
+          Math.abs(r - background.r) + Math.abs(g - background.g) + Math.abs(b - background.b);
+        const luminance = (r * 299 + g * 587 + b * 114) / 1000;
+        if (backgroundDistance > 64 && (saturation > 19 || luminance < 178)) mask[y * width + x] = 1;
+      }
+    }
+
+    const visited = new Uint8Array(mask.length);
+    let best = null;
+    const queueX = new Int32Array(mask.length);
+    const queueY = new Int32Array(mask.length);
+    for (let startY = 1; startY < height - 1; startY += 1) {
+      for (let startX = 1; startX < width - 1; startX += 1) {
+        const start = startY * width + startX;
+        if (!mask[start] || visited[start]) continue;
+        let head = 0;
+        let tail = 1;
+        let count = 0;
+        let minX = startX;
+        let maxX = startX;
+        let minY = startY;
+        let maxY = startY;
+        queueX[0] = startX;
+        queueY[0] = startY;
+        visited[start] = 1;
+        while (head < tail) {
+          const x = queueX[head];
+          const y = queueY[head];
+          head += 1;
+          count += 1;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+          for (const [dx, dy] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ]) {
+            const nextX = x + dx;
+            const nextY = y + dy;
+            const next = nextY * width + nextX;
+            if (
+              nextX > 0 &&
+              nextY > 0 &&
+              nextX < width - 1 &&
+              nextY < height - 1 &&
+              mask[next] &&
+              !visited[next]
+            ) {
+              visited[next] = 1;
+              queueX[tail] = nextX;
+              queueY[tail] = nextY;
+              tail += 1;
+            }
+          }
+        }
+        const boxWidth = maxX - minX + 1;
+        const boxHeight = maxY - minY + 1;
+        const boxArea = boxWidth * boxHeight;
+        if (boxWidth < width * 0.12 || boxHeight < height * 0.12 || boxArea < width * height * 0.025) {
+          continue;
+        }
+        const density = count / boxArea;
+        const score = count * (0.65 + Math.min(0.7, density));
+        if (!best || score > best.score) best = { minX, maxX, minY, maxY, score };
+      }
+    }
+
+    if (!best) return false;
+    // A key ring or loose accessory can be connected to the bead rectangle.
+    // Trim sparse tails from the chosen component before adding a small
+    // allowance for the pale outer bead row.
+    const componentWidth = best.maxX - best.minX + 1;
+    const componentHeight = best.maxY - best.minY + 1;
+    const columnCounts = new Int32Array(componentWidth);
+    const rowCounts = new Int32Array(componentHeight);
+    for (let y = best.minY; y <= best.maxY; y += 1) {
+      for (let x = best.minX; x <= best.maxX; x += 1) {
+        if (!mask[y * width + x]) continue;
+        columnCounts[x - best.minX] += 1;
+        rowCounts[y - best.minY] += 1;
+      }
+    }
+    const usefulColumns = [];
+    const usefulRows = [];
+    for (let index = 0; index < columnCounts.length; index += 1) {
+      if (columnCounts[index] >= componentHeight * 0.28) usefulColumns.push(index);
+    }
+    for (let index = 0; index < rowCounts.length; index += 1) {
+      if (rowCounts[index] >= componentWidth * 0.28) usefulRows.push(index);
+    }
+    if (usefulColumns.length >= componentWidth * 0.45) {
+      best.minX += usefulColumns[0];
+      best.maxX = best.minX + usefulColumns[usefulColumns.length - 1] - usefulColumns[0];
+    }
+    if (usefulRows.length >= componentHeight * 0.45) {
+      best.minY += usefulRows[0];
+      best.maxY = best.minY + usefulRows[usefulRows.length - 1] - usefulRows[0];
+    }
+
+    const marginX = (best.maxX - best.minX + 1) * 0.055;
+    const marginY =
+      (best.maxY - best.minY + 1) * (activeSourceMode() === "photo" ? 0.055 : 0.02);
+    const left = clamp((best.minX - marginX) / width, 0, 1);
+    const right = clamp((best.maxX + marginX) / width, 0, 1);
+    const top = clamp((best.minY - marginY) / height, 0, 1);
+    const bottom = clamp((best.maxY + marginY) / height, 0, 1);
+    state.frame = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+    syncCropFromFrame();
+    return true;
   }
 
   async function loadFile(file) {
@@ -189,10 +453,15 @@
       state.imageUrl = url;
       state.fileName = file.name.replace(/\.[^.]+$/, "") || "未命名图稿";
       state.crop = { left: 0, right: 0, top: 0, bottom: 0 };
+      state.frame = defaultFrame();
+      state.frameDrag = null;
+      state.sourcePixelCache = null;
+      state.detectedMode = detectImageKind();
+      suggestPhotoFrame();
       state.history = [];
       state.future = [];
       elements.fileName.textContent = state.fileName;
-      for (const side of ["Left", "Right", "Top", "Bottom"]) elements[`crop${side}`].value = 0;
+      syncCropFromFrame();
       elements.hero.hidden = true;
       elements.workspace.hidden = false;
       drawSourceThumb();
@@ -206,13 +475,82 @@
     image.src = url;
   }
 
+  function solveLinearSystem(matrix, values) {
+    const size = values.length;
+    const rows = matrix.map((row, index) => [...row, values[index]]);
+    for (let pivot = 0; pivot < size; pivot += 1) {
+      let largest = pivot;
+      for (let row = pivot + 1; row < size; row += 1) {
+        if (Math.abs(rows[row][pivot]) > Math.abs(rows[largest][pivot])) largest = row;
+      }
+      if (Math.abs(rows[largest][pivot]) < 1e-9) return null;
+      [rows[pivot], rows[largest]] = [rows[largest], rows[pivot]];
+      const divisor = rows[pivot][pivot];
+      for (let col = pivot; col <= size; col += 1) rows[pivot][col] /= divisor;
+      for (let row = 0; row < size; row += 1) {
+        if (row === pivot) continue;
+        const factor = rows[row][pivot];
+        for (let col = pivot; col <= size; col += 1) rows[row][col] -= factor * rows[pivot][col];
+      }
+    }
+    return rows.map((row) => row[size]);
+  }
+
+  function createFrameProjector(frame = state.frame) {
+    const source = [
+      { u: 0, v: 0, point: frame[0] },
+      { u: 1, v: 0, point: frame[1] },
+      { u: 1, v: 1, point: frame[2] },
+      { u: 0, v: 1, point: frame[3] },
+    ];
+    const matrix = [];
+    const values = [];
+    for (const { u, v, point } of source) {
+      matrix.push([u, v, 1, 0, 0, 0, -u * point.x, -v * point.x]);
+      values.push(point.x);
+      matrix.push([0, 0, 0, u, v, 1, -u * point.y, -v * point.y]);
+      values.push(point.y);
+    }
+    const solution = solveLinearSystem(matrix, values);
+    if (!solution) {
+      return (u, v) => ({
+        x:
+          frame[0].x * (1 - u) * (1 - v) +
+          frame[1].x * u * (1 - v) +
+          frame[2].x * u * v +
+          frame[3].x * (1 - u) * v,
+        y:
+          frame[0].y * (1 - u) * (1 - v) +
+          frame[1].y * u * (1 - v) +
+          frame[2].y * u * v +
+          frame[3].y * (1 - u) * v,
+      });
+    }
+    const [a, b, c, d, e, f, g, h] = solution;
+    return (u, v) => {
+      const denominator = g * u + h * v + 1;
+      return {
+        x: (a * u + b * v + c) / denominator,
+        y: (d * u + e * v + f) / denominator,
+      };
+    };
+  }
+
+  function canvasFramePoint(point) {
+    const view = state.sourceView;
+    return {
+      x: view.x + point.x * view.width,
+      y: view.y + point.y * view.height,
+    };
+  }
+
   function drawSourceThumb() {
     if (!state.image) return;
     const canvas = elements.sourceCanvas;
     const box = canvas.parentElement.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(260, Math.round(box.width * dpr));
-    canvas.height = Math.max(120, Math.round(box.height * dpr));
+    canvas.height = Math.max(180, Math.round(box.height * dpr));
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -221,54 +559,259 @@
     const height = state.image.naturalHeight * scale;
     const x = (canvas.width - width) / 2;
     const y = (canvas.height - height) / 2;
+    state.sourceView = { x, y, width, height, dpr };
     ctx.drawImage(state.image, x, y, width, height);
 
-    const crop = state.crop;
-    const cx = x + (width * crop.left) / 100;
-    const cy = y + (height * crop.top) / 100;
-    const cw = width * (1 - (crop.left + crop.right) / 100);
-    const ch = height * (1 - (crop.top + crop.bottom) / 100);
+    const frame = state.frame.map(canvasFramePoint);
+    const projector = createFrameProjector();
     ctx.save();
-    ctx.fillStyle = "rgba(26, 25, 22, 0.56)";
+    ctx.fillStyle = "rgba(18, 20, 19, 0.58)";
     ctx.beginPath();
     ctx.rect(x, y, width, height);
-    ctx.rect(cx, cy, cw, ch);
+    ctx.moveTo(frame[0].x, frame[0].y);
+    for (let index = 1; index < frame.length; index += 1) ctx.lineTo(frame[index].x, frame[index].y);
+    ctx.closePath();
     ctx.fill("evenodd");
+
+    for (let col = 0; col <= state.cols; col += 1) {
+      const u = col / state.cols;
+      const start = canvasFramePoint(projector(u, 0));
+      const end = canvasFramePoint(projector(u, 1));
+      ctx.strokeStyle = col % 5 === 0 ? "rgba(255,255,255,.78)" : "rgba(255,255,255,.38)";
+      ctx.lineWidth = col % 5 === 0 ? 1.15 * dpr : 0.65 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+    for (let row = 0; row <= state.rows; row += 1) {
+      const v = row / state.rows;
+      const start = canvasFramePoint(projector(0, v));
+      const end = canvasFramePoint(projector(1, v));
+      ctx.strokeStyle = row % 5 === 0 ? "rgba(255,255,255,.78)" : "rgba(255,255,255,.38)";
+      ctx.lineWidth = row % 5 === 0 ? 1.15 * dpr : 0.65 * dpr;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2 * dpr;
-    ctx.setLineDash([5 * dpr, 4 * dpr]);
-    ctx.strokeRect(cx, cy, cw, ch);
+    ctx.lineWidth = 2.2 * dpr;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(frame[0].x, frame[0].y);
+    for (let index = 1; index < frame.length; index += 1) ctx.lineTo(frame[index].x, frame[index].y);
+    ctx.closePath();
+    ctx.stroke();
+    frame.forEach((point, index) => {
+      ctx.fillStyle = "#ffffff";
+      ctx.strokeStyle = index === 0 ? "#e7b63e" : "#39795f";
+      ctx.lineWidth = 2 * dpr;
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 6.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
     ctx.restore();
+    canvas.setAttribute(
+      "aria-label",
+      `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}框选预览，当前 ${state.cols} 列 × ${state.rows} 行`,
+    );
   }
 
-  function makeAnalysisCanvas(maxSide = 520) {
-    const rect = getCropRect();
-    const scale = Math.min(1, maxSide / Math.max(rect.width, rect.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(2, Math.round(rect.width * scale));
-    canvas.height = Math.max(2, Math.round(rect.height * scale));
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    if (!elements.keepTransparent.checked) {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+  function readSourcePixel(source, normalizedX, normalizedY) {
+    const x = clamp(normalizedX * (source.width - 1), 0, source.width - 1);
+    const y = clamp(normalizedY * (source.height - 1), 0, source.height - 1);
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const x1 = Math.min(source.width - 1, x0 + 1);
+    const y1 = Math.min(source.height - 1, y0 + 1);
+    const fx = x - x0;
+    const fy = y - y0;
+    const result = [0, 0, 0, 0];
+    for (const [sampleX, sampleY, weight] of [
+      [x0, y0, (1 - fx) * (1 - fy)],
+      [x1, y0, fx * (1 - fy)],
+      [x0, y1, (1 - fx) * fy],
+      [x1, y1, fx * fy],
+    ]) {
+      const index = (sampleY * source.width + sampleX) * 4;
+      for (let channel = 0; channel < 4; channel += 1) result[channel] += source.data[index + channel] * weight;
     }
-    ctx.drawImage(
-      state.image,
-      rect.x,
-      rect.y,
-      rect.width,
-      rect.height,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    );
+    return result;
+  }
+
+  function makeRectifiedCanvas(maxSide = 520) {
+    const points = getFramePixels();
+    const top = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
+    const bottom = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
+    const left = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
+    const right = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
+    const naturalWidth = Math.max(2, (top + bottom) / 2);
+    const naturalHeight = Math.max(2, (left + right) / 2);
+    const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, Math.round(naturalWidth * scale));
+    canvas.height = Math.max(2, Math.round(naturalHeight * scale));
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const output = ctx.createImageData(canvas.width, canvas.height);
+    const source = getSourcePixelData(Math.max(900, Math.min(1800, maxSide * 3)));
+    const projector = createFrameProjector();
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const point = projector((x + 0.5) / canvas.width, (y + 0.5) / canvas.height);
+        const color = readSourcePixel(source, point.x, point.y);
+        const index = (y * canvas.width + x) * 4;
+        const alpha = color[3] / 255;
+        if (!elements.keepTransparent.checked && alpha < 1) {
+          output.data[index] = color[0] * alpha + 255 * (1 - alpha);
+          output.data[index + 1] = color[1] * alpha + 255 * (1 - alpha);
+          output.data[index + 2] = color[2] * alpha + 255 * (1 - alpha);
+          output.data[index + 3] = 255;
+        } else {
+          output.data[index] = color[0];
+          output.data[index + 1] = color[1];
+          output.data[index + 2] = color[2];
+          output.data[index + 3] = color[3];
+        }
+      }
+    }
+    ctx.putImageData(output, 0, 0);
     return canvas;
   }
 
-  function buildAxisEdges(imageData, axis) {
+  function makeAnalysisCanvas(maxSide = 520) {
+    return makeRectifiedCanvas(maxSide);
+  }
+
+  function framePolygonArea(frame) {
+    let area = 0;
+    for (let index = 0; index < frame.length; index += 1) {
+      const current = frame[index];
+      const next = frame[(index + 1) % frame.length];
+      area += current.x * next.y - next.x * current.y;
+    }
+    return area / 2;
+  }
+
+  function frameIsConvex(frame) {
+    if (Math.abs(framePolygonArea(frame)) < 0.0025) return false;
+    let sign = 0;
+    for (let index = 0; index < frame.length; index += 1) {
+      const a = frame[index];
+      const b = frame[(index + 1) % frame.length];
+      const c = frame[(index + 2) % frame.length];
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (Math.abs(cross) < 1e-6) continue;
+      const currentSign = Math.sign(cross);
+      if (sign && currentSign !== sign) return false;
+      sign = currentSign;
+    }
+    return true;
+  }
+
+  function pointerImagePoint(event) {
+    const rect = elements.sourceCanvas.getBoundingClientRect();
+    const canvasX = ((event.clientX - rect.left) / rect.width) * elements.sourceCanvas.width;
+    const canvasY = ((event.clientY - rect.top) / rect.height) * elements.sourceCanvas.height;
+    const view = state.sourceView;
+    return {
+      x: clamp((canvasX - view.x) / view.width, 0, 1),
+      y: clamp((canvasY - view.y) / view.height, 0, 1),
+      canvasX,
+      canvasY,
+    };
+  }
+
+  function pointInsideFrame(point) {
+    let sign = 0;
+    for (let index = 0; index < state.frame.length; index += 1) {
+      const a = state.frame[index];
+      const b = state.frame[(index + 1) % state.frame.length];
+      const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+      if (Math.abs(cross) < 1e-6) continue;
+      if (!sign) sign = Math.sign(cross);
+      else if (Math.sign(cross) !== sign) return false;
+    }
+    return true;
+  }
+
+  function startFramePointer(event) {
+    if (!state.image || event.button > 0) return;
+    const point = pointerImagePoint(event);
+    const handleRadius = 18 * state.sourceView.dpr;
+    let corner = -1;
+    let nearest = Infinity;
+    state.frame.forEach((framePoint, index) => {
+      const canvasPoint = canvasFramePoint(framePoint);
+      const distance = Math.hypot(canvasPoint.x - point.canvasX, canvasPoint.y - point.canvasY);
+      if (distance < handleRadius && distance < nearest) {
+        corner = index;
+        nearest = distance;
+      }
+    });
+    state.frameDrag = {
+      type: corner >= 0 ? "corner" : pointInsideFrame(point) ? "move" : "create",
+      corner,
+      start: { x: point.x, y: point.y },
+      initial: state.frame.map((framePoint) => ({ ...framePoint })),
+    };
+    elements.sourceCanvas.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }
+
+  function moveFramePointer(event) {
+    if (!state.frameDrag) return;
+    const point = pointerImagePoint(event);
+    const drag = state.frameDrag;
+    if (drag.type === "corner") {
+      const next = drag.initial.map((framePoint) => ({ ...framePoint }));
+      next[drag.corner] = { x: point.x, y: point.y };
+      if (frameIsConvex(next)) state.frame = next;
+    } else if (drag.type === "move") {
+      const deltaX = point.x - drag.start.x;
+      const deltaY = point.y - drag.start.y;
+      const minX = Math.min(...drag.initial.map((framePoint) => framePoint.x));
+      const maxX = Math.max(...drag.initial.map((framePoint) => framePoint.x));
+      const minY = Math.min(...drag.initial.map((framePoint) => framePoint.y));
+      const maxY = Math.max(...drag.initial.map((framePoint) => framePoint.y));
+      const safeX = clamp(deltaX, -minX, 1 - maxX);
+      const safeY = clamp(deltaY, -minY, 1 - maxY);
+      state.frame = drag.initial.map((framePoint) => ({
+        x: framePoint.x + safeX,
+        y: framePoint.y + safeY,
+      }));
+    } else {
+      const left = Math.min(drag.start.x, point.x);
+      const right = Math.max(drag.start.x, point.x);
+      const top = Math.min(drag.start.y, point.y);
+      const bottom = Math.max(drag.start.y, point.y);
+      if (right - left >= 0.03 && bottom - top >= 0.03) {
+        state.frame = [
+          { x: left, y: top },
+          { x: right, y: top },
+          { x: right, y: bottom },
+          { x: left, y: bottom },
+        ];
+      }
+    }
+    syncCropFromFrame();
+    drawSourceThumb();
+    event.preventDefault();
+  }
+
+  function finishFramePointer(event) {
+    if (!state.frameDrag) return;
+    state.frameDrag = null;
+    elements.sourceCanvas.releasePointerCapture?.(event.pointerId);
+    syncCropFromFrame();
+    drawSourceThumb();
+    processImage({ resetHistory: true });
+    event.preventDefault();
+  }
+
+  function buildAxisEdges(imageData, axis, emphasizeSparse = false) {
     const { data, width, height } = imageData;
     const length = axis === "x" ? width : height;
     const cross = axis === "x" ? height : width;
@@ -278,7 +821,12 @@
     for (let position = 1; position < length; position += 1) {
       let total = 0;
       let count = 0;
+      const sparseEdges = emphasizeSparse ? [] : null;
       for (let other = 0; other < cross; other += step) {
+        if (emphasizeSparse) {
+          const crossRatio = other / Math.max(1, cross - 1);
+          if (crossRatio > 0.16 && crossRatio < 0.84) continue;
+        }
         const x1 = axis === "x" ? position - 1 : other;
         const y1 = axis === "x" ? other : position - 1;
         const x2 = axis === "x" ? position : other;
@@ -286,14 +834,24 @@
         const a = (y1 * width + x1) * 4;
         const b = (y2 * width + x2) * 4;
         const alpha = Math.min(data[a + 3], data[b + 3]) / 255;
-        total +=
+        const difference =
           alpha *
           (Math.abs(data[a] - data[b]) * 0.3 +
             Math.abs(data[a + 1] - data[b + 1]) * 0.55 +
             Math.abs(data[a + 2] - data[b + 2]) * 0.15);
+        total += difference;
+        if (sparseEdges) sparseEdges.push(difference);
         count += 1;
       }
-      edges[position] = count ? total / count : 0;
+      if (sparseEdges?.length) {
+        sparseEdges.sort((a, b) => b - a);
+        const topCount = Math.max(2, Math.ceil(sparseEdges.length * 0.12));
+        let topTotal = 0;
+        for (let index = 0; index < topCount; index += 1) topTotal += sparseEdges[index];
+        edges[position] = (topTotal / topCount) * 0.78 + (total / count) * 0.22;
+      } else {
+        edges[position] = count ? total / count : 0;
+      }
     }
     return edges;
   }
@@ -368,6 +926,64 @@
     return { ...best, confidence };
   }
 
+  function inferPhotoAxisCount(imageData, axis) {
+    const { data, width, height } = imageData;
+    const length = axis === "x" ? width : height;
+    const cross = axis === "x" ? height : width;
+    const luminance = new Float32Array(width * height);
+    for (let index = 0; index < width * height; index += 1) {
+      const source = index * 4;
+      luminance[index] =
+        data[source] * 0.299 + data[source + 1] * 0.587 + data[source + 2] * 0.114;
+    }
+
+    const gradient = (position, other) => {
+      if (axis === "x") {
+        const left = other * width + position - 1;
+        const right = other * width + position + 1;
+        return Math.abs(luminance[right] - luminance[left]);
+      }
+      const above = (position - 1) * width + other;
+      const below = (position + 1) * width + other;
+      return Math.abs(luminance[below] - luminance[above]);
+    };
+
+    const maxLag = Math.min(56, Math.floor(length / 5));
+    const scores = [];
+    for (let lag = 6; lag <= maxLag; lag += 1) {
+      let correlation = 0;
+      let count = 0;
+      for (let position = 2; position < length - lag - 2; position += 2) {
+        for (let other = 1; other < cross - 1; other += 2) {
+          const first = Math.max(0, gradient(position, other) - 6);
+          const second = Math.max(0, gradient(position + lag, other) - 6);
+          correlation += first * second;
+          count += 1;
+        }
+      }
+      scores.push({ lag, score: correlation / Math.max(1, count) });
+    }
+    scores.sort((a, b) => b.score - a.score);
+    const best = scores[0] || { lag: Math.max(6, length / 24), score: 0 };
+    const plateau = scores
+      .filter((candidate) => Math.abs(candidate.lag - best.lag) <= 3)
+      .filter((candidate) => candidate.score >= best.score * 0.72);
+    const totalWeight = plateau.reduce((sum, candidate) => sum + candidate.score, 0);
+    const period =
+      totalWeight > 0
+        ? plateau.reduce((sum, candidate) => sum + candidate.lag * candidate.score, 0) / totalWeight
+        : best.lag;
+    const backgroundScore =
+      scores.slice(Math.floor(scores.length / 2)).reduce((sum, candidate) => sum + candidate.score, 0) /
+      Math.max(1, Math.ceil(scores.length / 2));
+    const confidence = clamp(0.42 + (best.score / Math.max(0.01, backgroundScore) - 1) * 0.16, 0.35, 0.9);
+    return {
+      count: clamp(Math.round(length / Math.max(1, period)), 6, 120),
+      score: best.score,
+      confidence,
+    };
+  }
+
   async function autoDetect(isInitial = false) {
     if (!state.image) return;
     readCrop();
@@ -380,9 +996,16 @@
       const canvas = makeAnalysisCanvas();
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const rect = getCropRect();
-      const xResult = inferAxisCount(buildAxisEdges(imageData, "x"), rect.width);
-      const yResult = inferAxisCount(buildAxisEdges(imageData, "y"), rect.height);
+      const rect = { width: canvas.width, height: canvas.height };
+      const photoMode = activeSourceMode() === "photo";
+      const xEdges = buildAxisEdges(imageData, "x", photoMode);
+      const yEdges = buildAxisEdges(imageData, "y", photoMode);
+      const xResult = photoMode
+        ? inferPhotoAxisCount(imageData, "x")
+        : inferAxisCount(xEdges, canvas.width);
+      const yResult = photoMode
+        ? inferPhotoAxisCount(imageData, "y")
+        : inferAxisCount(yEdges, canvas.height);
       if (token !== state.processingToken) return;
 
       state.cols = clamp(xResult.count, 2, 200);
@@ -392,7 +1015,11 @@
       const cellX = rect.width / state.cols;
       const cellY = rect.height / state.rows;
       if (Math.max(cellX, cellY) / Math.max(0.01, Math.min(cellX, cellY)) > 1.45) {
-        if (xResult.confidence > yResult.confidence + 0.12) {
+        if (state.rows < 8 && state.cols >= 8) {
+          state.rows = clamp(Math.round(rect.height / cellX), 2, 200);
+        } else if (state.cols < 8 && state.rows >= 8) {
+          state.cols = clamp(Math.round(rect.width / cellY), 2, 200);
+        } else if (xResult.confidence > yResult.confidence + 0.12) {
           state.rows = clamp(Math.round(rect.height / cellX), 2, 200);
         } else if (yResult.confidence > xResult.confidence + 0.12) {
           state.cols = clamp(Math.round(rect.width / cellY), 2, 200);
@@ -447,59 +1074,54 @@
   }
 
   function labDistance(a, b) {
-    return Math.hypot(a.l - b.l, a.a - b.a, a.b - b.b);
+    const lightnessWeight = activeSourceMode() === "photo" ? 0.42 : 1;
+    return Math.hypot((a.l - b.l) * lightnessWeight, a.a - b.a, a.b - b.b);
   }
 
   function sampleCells() {
-    const rect = getCropRect();
     const cols = state.cols;
     const rows = state.rows;
-    const nativeCell = Math.min(rect.width / cols, rect.height / rows);
-    const sampleSize = clamp(Math.floor(nativeCell), 4, 10);
-    const canvas = document.createElement("canvas");
-    canvas.width = cols * sampleSize;
-    canvas.height = rows * sampleSize;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    if (!elements.keepTransparent.checked) {
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    ctx.drawImage(
-      state.image,
-      rect.x,
-      rect.y,
-      rect.width,
-      rect.height,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    );
-    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const source = getSourcePixelData(1800);
+    const projector = createFrameProjector();
+    const photoMode = activeSourceMode() === "photo";
     const samples = [];
     const confidences = [];
-    const inset = Math.max(1, Math.floor(sampleSize * 0.2));
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
-        const rs = [];
-        const gs = [];
-        const bs = [];
-        const alphas = [];
-        for (let y = inset; y < sampleSize - inset; y += 1) {
-          for (let x = inset; x < sampleSize - inset; x += 1) {
-            const index = ((row * sampleSize + y) * canvas.width + col * sampleSize + x) * 4;
-            const alpha = data[index + 3];
-            alphas.push(alpha);
-            if (alpha >= 20) {
-              rs.push(data[index]);
-              gs.push(data[index + 1]);
-              bs.push(data[index + 2]);
+        const colors = [];
+        if (photoMode) {
+          // Hollow beads and glossy highlights make the center unreliable.
+          // Sample two rings around each center and discard luminance extremes.
+          for (const radius of [0.25, 0.36]) {
+            for (let angleIndex = 0; angleIndex < 16; angleIndex += 1) {
+              const angle = (Math.PI * 2 * angleIndex) / 16;
+              const u = (col + 0.5 + Math.cos(angle) * radius) / cols;
+              const v = (row + 0.5 + Math.sin(angle) * radius) / rows;
+              const point = projector(u, v);
+              colors.push(readSourcePixel(source, point.x, point.y));
+            }
+          }
+        } else {
+          for (const offsetY of [-0.2, -0.1, 0, 0.1, 0.2]) {
+            for (const offsetX of [-0.2, -0.1, 0, 0.1, 0.2]) {
+              const point = projector((col + 0.5 + offsetX) / cols, (row + 0.5 + offsetY) / rows);
+              colors.push(readSourcePixel(source, point.x, point.y));
             }
           }
         }
+
+        colors.sort(
+          (a, b) =>
+            (a[0] * 299 + a[1] * 587 + a[2] * 114) / 1000 -
+            (b[0] * 299 + b[1] * 587 + b[2] * 114) / 1000,
+        );
+        const trim = photoMode ? Math.floor(colors.length * 0.2) : 0;
+        const stableColors = colors.slice(trim, colors.length - trim || colors.length);
+        const rs = stableColors.filter((color) => color[3] >= 20).map((color) => color[0]);
+        const gs = stableColors.filter((color) => color[3] >= 20).map((color) => color[1]);
+        const bs = stableColors.filter((color) => color[3] >= 20).map((color) => color[2]);
+        const alphas = stableColors.map((color) => color[3]);
         const alpha = median(alphas);
         if (!rs.length || (elements.keepTransparent.checked && alpha < 100)) {
           samples.push({ r: 0, g: 0, b: 0, a: 0, lab: null });
@@ -514,7 +1136,7 @@
         );
         const variability = median(deviations) / 3;
         samples.push(color);
-        confidences.push(clamp(1 - variability / 50, 0, 1));
+        confidences.push(clamp(1 - variability / (photoMode ? 72 : 50), 0, 1));
       }
     }
     return { samples, confidences };
@@ -840,26 +1462,13 @@
   function renderOriginal() {
     if (!state.image) return;
     const canvas = elements.originalCanvas;
-    const rect = getCropRect();
-    const scale = Math.min(1, 1400 / Math.max(rect.width, rect.height));
-    canvas.width = Math.max(2, Math.round(rect.width * scale));
-    canvas.height = Math.max(2, Math.round(rect.height * scale));
+    const rectified = makeRectifiedCanvas(900);
+    canvas.width = rectified.width;
+    canvas.height = rectified.height;
     canvas.style.width = `${Math.round(canvas.width * state.zoom)}px`;
     canvas.style.height = `${Math.round(canvas.height * state.zoom)}px`;
     const ctx = canvas.getContext("2d");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(
-      state.image,
-      rect.x,
-      rect.y,
-      rect.width,
-      rect.height,
-      0,
-      0,
-      canvas.width,
-      canvas.height,
-    );
+    ctx.drawImage(rectified, 0, 0);
   }
 
   function renderPalette() {
@@ -1161,7 +1770,7 @@
 
   const processDebounced = debounce(() => processImage({ resetHistory: true }), 260);
   const cropDebounced = debounce(() => {
-    readCrop();
+    readCrop(true);
     drawSourceThumb();
     processImage({ resetHistory: true });
   }, 320);
@@ -1205,6 +1814,41 @@
       if (state.cells.length) safeShowModal(elements.exportDialog);
     });
     elements.detectButton.addEventListener("click", () => autoDetect(false));
+    elements.resetFrameButton.addEventListener("click", () => {
+      if (!state.image) return;
+      state.frame = defaultFrame();
+      suggestPhotoFrame();
+      syncCropFromFrame();
+      drawSourceThumb();
+      autoDetect(false);
+    });
+    elements.sourceMode.addEventListener("change", () => {
+      if (!state.image) return;
+      suggestPhotoFrame();
+      drawSourceThumb();
+      autoDetect(false);
+    });
+    elements.sourceCanvas.addEventListener("pointerdown", startFramePointer);
+    elements.sourceCanvas.addEventListener("pointermove", moveFramePointer);
+    elements.sourceCanvas.addEventListener("pointerup", finishFramePointer);
+    elements.sourceCanvas.addEventListener("pointercancel", finishFramePointer);
+    elements.sourceCanvas.addEventListener("keydown", (event) => {
+      if (!state.image || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+      const amount = event.shiftKey ? 0.01 : 0.0025;
+      const deltaX = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0;
+      const deltaY = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
+      const minX = Math.min(...state.frame.map((point) => point.x));
+      const maxX = Math.max(...state.frame.map((point) => point.x));
+      const minY = Math.min(...state.frame.map((point) => point.y));
+      const maxY = Math.max(...state.frame.map((point) => point.y));
+      const safeX = clamp(deltaX, -minX, 1 - maxX);
+      const safeY = clamp(deltaY, -minY, 1 - maxY);
+      state.frame = state.frame.map((point) => ({ x: point.x + safeX, y: point.y + safeY }));
+      syncCropFromFrame();
+      drawSourceThumb();
+      processDebounced();
+      event.preventDefault();
+    });
 
     for (const input of [
       elements.cropLeft,
@@ -1218,6 +1862,9 @@
       input.addEventListener("input", () => {
         const cols = clamp(Math.round(Number(elements.gridCols.value) || state.cols), 2, 200);
         const rows = clamp(Math.round(Number(elements.gridRows.value) || state.rows), 2, 200);
+        state.cols = cols;
+        state.rows = rows;
+        drawSourceThumb();
         elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新自动识别”会重新推测行列数。`;
         processDebounced();
       });
@@ -1300,7 +1947,7 @@
     restoreSettings();
     bindEvents();
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=6").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
     }
     window.addEventListener(
       "load",

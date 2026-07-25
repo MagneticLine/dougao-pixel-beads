@@ -1,11 +1,12 @@
-const CACHE_NAME = "dougao-v7";
+const CACHE_NAME = "dougao-v18";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles.css?v=7",
-  "./app.js?v=7.2",
-  "./manifest.webmanifest?v=7",
+  "./styles.css?v=18",
+  "./app.js?v=18",
+  "./manifest.webmanifest?v=18",
+  "./favicon.svg",
   "./og.png",
 ];
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f6f1e7" />
-    <meta name="description" content="在浏览器本地把模糊、压缩的像素图还原成颜色稳定、边缘干净的拼豆图纸。" />
+    <meta name="description" content="在浏览器本地把像素图或实物拼豆照片整理成颜色稳定、边缘干净的拼豆图纸。" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="豆稿 · 像素图转拼豆图纸" />
     <meta property="og:description" content="把模糊、压缩的像素图整理成能照着拼的清晰图纸，图片仅在本机处理。" />
@@ -14,8 +14,9 @@
     <meta name="twitter:description" content="把模糊、压缩的像素图整理成能照着拼的清晰图纸。" />
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
-    <link rel="manifest" href="./manifest.webmanifest?v=7" />
-    <link rel="stylesheet" href="./styles.css?v=7" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest?v=18" />
+    <link rel="stylesheet" href="./styles.css?v=18" />
   </head>
   <body>
     <header class="topbar">
@@ -86,13 +87,24 @@
           <aside class="controls" aria-label="图纸参数">
             <div class="control-section">
               <button class="section-title" type="button" aria-expanded="true">
-                <span><em>1</em> 网格与裁切</span><i>⌃</i>
+                <span><em>1</em> 网格与框选</span><i>⌃</i>
               </button>
               <div class="section-body">
-                <div class="source-thumb">
-                  <canvas id="sourceCanvas" aria-label="原图裁切预览"></canvas>
-                  <div class="crop-mask" aria-hidden="true"></div>
+                <div class="frame-tools">
+                  <label class="mode-field">
+                    <span>图片类型</span>
+                    <select id="sourceMode">
+                      <option value="auto" selected>自动判断</option>
+                      <option value="pixel">像素图</option>
+                      <option value="photo">实物拼豆照片</option>
+                    </select>
+                  </label>
+                  <button class="text-button frame-reset" id="resetFrameButton" type="button">重置框选</button>
                 </div>
+                <div class="source-thumb">
+                  <canvas id="sourceCanvas" tabindex="0" aria-label="原图框选预览；拖动框内可移动，拖动四角可校正透视"></canvas>
+                </div>
+                <p class="frame-hint"><b>拖动框内移动，拖动四角缩放或校正透视。</b>框内网格会随行列数实时变化。</p>
                 <div class="crop-grid">
                   <label>左 <input id="cropLeft" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>右 <input id="cropRight" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
@@ -188,9 +200,10 @@
         <p class="eyebrow">快速上手</p>
         <h2>怎样得到更准确的图纸？</h2>
         <ol>
-          <li><b>先看网格。</b>如果豆子错位，手动修改行列数；原图带白边时先用裁切去掉。</li>
-          <li><b>再看颜色。</b>压缩严重时提高“去杂色”，颜色太多时提高“近似色合并”。</li>
-          <li><b>最后修正。</b>在颜色表选中颜色，直接点图纸中的单颗豆子。</li>
+                  <li><b>先框边缘。</b>拖动框内移动，拖动四角贴住图案或拼豆板；斜拍照片可以分别校正四个角。</li>
+                  <li><b>再看网格。</b>修改行列数时，原图上的网格会实时变化；让格线穿过每颗豆之间的缝隙。</li>
+                  <li><b>然后看颜色。</b>实物照片会避开中心孔和反光取色；颜色太多时提高“近似色合并”。</li>
+                  <li><b>最后修正。</b>在颜色表选中颜色，直接点图纸中的单颗豆子。</li>
         </ol>
         <div class="notice">处理全程发生在你的浏览器里。刷新或关闭页面后，原图和图纸不会被保存在服务器。</div>
         <button class="primary-button full" value="close">知道了</button>
@@ -212,6 +225,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=7.2"></script>
+    <script src="./app.js?v=18"></script>
   </body>
 </html>

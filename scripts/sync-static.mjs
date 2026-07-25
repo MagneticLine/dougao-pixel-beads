@@ -13,6 +13,7 @@ const files = [
   ["styles.css", "styles.css"],
   ["manifest.webmanifest", "manifest.webmanifest"],
   ["sw.js", "sw.js"],
+  ["favicon.svg", "favicon.svg"],
   ["og.png", "og.png"],
 ];
 

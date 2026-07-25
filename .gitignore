@@ -4,4 +4,5 @@ dist/
 .wrangler/
 public/
 .tmp-browser-test/
+.playwright-cli/
 *.tgz
