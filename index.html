@@ -16,7 +16,7 @@
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.webmanifest?v=23" />
-    <link rel="stylesheet" href="./styles.css?v=23" />
+    <link rel="stylesheet" href="./styles.css?v=29" />
   </head>
   <body>
     <header class="topbar">
@@ -221,7 +221,15 @@
                   <button id="cancelColorPickButton" type="button">取消</button>
                 </div>
                 <aside class="live-pattern-preview" aria-label="实时图纸预览">
-                  <header><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></header>
+                  <header>
+                    <span><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></span>
+                    <button
+                      id="livePreviewToggle"
+                      type="button"
+                      aria-expanded="true"
+                      aria-label="收起实时图纸预览"
+                    >收起</button>
+                  </header>
                   <div><canvas id="livePatternCanvas" aria-label="随校准结果更新的拼豆图纸预览"></canvas></div>
                   <p>拖动悬浮窗可移动 · 松开校准后更新</p>
                 </aside>
@@ -286,7 +294,46 @@
       </form>
     </dialog>
 
+    <dialog id="colorEditorDialog" class="color-editor-dialog">
+      <form method="dialog" class="color-editor-sheet">
+        <header class="color-editor-head">
+          <span>
+            <small>图纸颜色</small>
+            <b id="colorEditorTitle">调整颜色</b>
+          </span>
+          <button id="colorEditorClose" type="button" aria-label="关闭颜色选择器">×</button>
+        </header>
+        <div
+          class="color-sv-field"
+          id="colorSvField"
+          role="slider"
+          tabindex="0"
+          aria-label="饱和度和明度"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="100"
+        >
+          <i id="colorSvCursor" aria-hidden="true"></i>
+        </div>
+        <label class="color-hue-field">
+          <span>色相</span>
+          <input id="colorHueInput" type="range" min="0" max="360" step="1" value="0" />
+        </label>
+        <div class="color-editor-value">
+          <i id="colorEditorPreview" aria-hidden="true"></i>
+          <label>
+            <span>HEX</span>
+            <input id="colorHexInput" type="text" maxlength="7" value="#FF0000" inputmode="text" />
+          </label>
+        </div>
+        <div class="color-editor-actions">
+          <button id="colorEditorCancel" type="button">取消</button>
+          <button id="colorEditorApply" type="button">应用颜色</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=23"></script>
+    <script src="./app.js?v=29"></script>
   </body>
 </html>

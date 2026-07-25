@@ -54,9 +54,20 @@
     livePatternPreview: $(".live-pattern-preview"),
     livePatternCanvas: $("#livePatternCanvas"),
     livePreviewMeta: $("#livePreviewMeta"),
+    livePreviewToggle: $("#livePreviewToggle"),
     colorPickBanner: $("#colorPickBanner"),
     colorPickLabel: $("#colorPickLabel"),
     cancelColorPickButton: $("#cancelColorPickButton"),
+    colorEditorDialog: $("#colorEditorDialog"),
+    colorEditorTitle: $("#colorEditorTitle"),
+    colorEditorClose: $("#colorEditorClose"),
+    colorSvField: $("#colorSvField"),
+    colorSvCursor: $("#colorSvCursor"),
+    colorHueInput: $("#colorHueInput"),
+    colorEditorPreview: $("#colorEditorPreview"),
+    colorHexInput: $("#colorHexInput"),
+    colorEditorCancel: $("#colorEditorCancel"),
+    colorEditorApply: $("#colorEditorApply"),
     resultTab: $("#resultTab"),
     originalTab: $("#originalTab"),
     undoButton: $("#undoButton"),
@@ -108,6 +119,10 @@
     matchDrag: null,
     previewDrag: null,
     previewPosition: null,
+    livePreviewCollapsed: false,
+    colorEditorIndex: -1,
+    colorEditorPointer: null,
+    colorEditorDraft: { h: 0, s: 1, v: 1 },
     zoom: 1,
     sourceZoom: 1,
     view: "result",
@@ -520,9 +535,9 @@
       best.maxY = best.minY + usefulRows[usefulRows.length - 1] - usefulRows[0];
     }
 
+    const photoMode = activeSourceMode() === "photo";
     const marginX = (best.maxX - best.minX + 1) * 0.055;
-    const marginY =
-      (best.maxY - best.minY + 1) * (activeSourceMode() === "photo" ? 0.055 : 0.02);
+    const marginY = (best.maxY - best.minY + 1) * (photoMode ? 0.055 : 0.02);
     const left = clamp((best.minX - marginX) / width, 0, 1);
     const right = clamp((best.maxX + marginX) / width, 0, 1);
     const top = clamp((best.minY - marginY) / height, 0, 1);
@@ -583,6 +598,7 @@
       state.matchDrag = null;
       state.previewDrag = null;
       state.previewPosition = null;
+      setLivePreviewCollapsed(window.matchMedia("(max-width: 680px)").matches);
       elements.livePatternPreview.style.removeProperty("left");
       elements.livePatternPreview.style.removeProperty("top");
       elements.livePatternPreview.style.removeProperty("right");
@@ -724,29 +740,32 @@
     ctx.closePath();
     ctx.fill("evenodd");
 
-    ctx.shadowColor = "rgba(5, 11, 13, 0.82)";
-    ctx.shadowBlur = 1.4 * dpr;
-    for (let col = 0; col <= state.cols; col += 1) {
-      const u = col / state.cols;
-      const start = canvasFramePoint(projector(u, 0));
-      const end = canvasFramePoint(projector(u, 1));
-      ctx.strokeStyle = col % 5 === 0 ? "rgba(255,255,255,.78)" : "rgba(255,255,255,.38)";
-      ctx.lineWidth = col % 5 === 0 ? 1.15 * dpr : 0.65 * dpr;
+    const strokeCalibrationGridLine = (start, end, major) => {
+      ctx.shadowColor = "transparent";
+      ctx.strokeStyle = major ? "rgba(13, 17, 17, 0.9)" : "rgba(13, 17, 17, 0.76)";
+      ctx.lineWidth = (major ? 2.7 : 1.8) * dpr;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
+      ctx.strokeStyle = major ? "rgba(255, 225, 77, 0.96)" : "rgba(255, 102, 80, 0.9)";
+      ctx.lineWidth = (major ? 1.35 : 0.78) * dpr;
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    };
+    for (let col = 0; col <= state.cols; col += 1) {
+      const u = col / state.cols;
+      const start = canvasFramePoint(projector(u, 0));
+      const end = canvasFramePoint(projector(u, 1));
+      strokeCalibrationGridLine(start, end, col % 5 === 0);
     }
     for (let row = 0; row <= state.rows; row += 1) {
       const v = row / state.rows;
       const start = canvasFramePoint(projector(0, v));
       const end = canvasFramePoint(projector(1, v));
-      ctx.strokeStyle = row % 5 === 0 ? "rgba(255,255,255,.78)" : "rgba(255,255,255,.38)";
-      ctx.lineWidth = row % 5 === 0 ? 1.15 * dpr : 0.65 * dpr;
-      ctx.beginPath();
-      ctx.moveTo(start.x, start.y);
-      ctx.lineTo(end.x, end.y);
-      ctx.stroke();
+      strokeCalibrationGridLine(start, end, row % 5 === 0);
     }
 
     const traceFrame = () => {
@@ -1210,6 +1229,142 @@
     };
   }
 
+  function edgePeak(edges, position, radius) {
+    let peak = 0;
+    const center = Math.round(position);
+    for (let offset = -radius; offset <= radius; offset += 1) {
+      const index = clamp(center + offset, 1, edges.length - 1);
+      peak = Math.max(peak, edges[index] || 0);
+    }
+    return peak;
+  }
+
+  function scoreGridBounds(edges, count, start, end) {
+    const span = end - start;
+    const cell = span / count;
+    if (cell < 1.6) return -Infinity;
+    const radius = cell >= 8 ? 2 : 1;
+    let boundary = 0;
+    let boundaryWeight = 0;
+    for (let line = 0; line <= count; line += 1) {
+      const endpoint = line === 0 || line === count;
+      const weight = endpoint ? 0.72 : 1;
+      boundary += edgePeak(edges, start + line * cell, radius) * weight;
+      boundaryWeight += weight;
+    }
+    let interior = 0;
+    let interiorCount = 0;
+    for (let cellIndex = 0; cellIndex < count; cellIndex += 1) {
+      for (const phase of [0.28, 0.5, 0.72]) {
+        interior += edgePeak(edges, start + (cellIndex + phase) * cell, 0);
+        interiorCount += 1;
+      }
+    }
+    const boundaryMean = boundary / Math.max(1, boundaryWeight);
+    const interiorMean = interior / Math.max(1, interiorCount);
+    return boundaryMean - interiorMean * 0.72;
+  }
+
+  function fitAxisGridBounds(edges, count, photoMode) {
+    const length = edges.length;
+    const nominalCell = length / Math.max(1, count);
+    if (count < 3 || nominalCell < 2.2) {
+      return { start: 0, end: length, changed: false, gain: 0 };
+    }
+    const averageEdge =
+      edges.reduce((sum, value, index) => sum + (index ? value : 0), 0) /
+      Math.max(1, length - 1);
+    const maxTrim = Math.min(
+      length * (photoMode ? 0.065 : 0.105),
+      nominalCell * (photoMode ? 0.72 : 1.18),
+    );
+    const step = Math.max(0.7, nominalCell / 12);
+    const baseline = scoreGridBounds(edges, count, 0, length);
+    let best = { start: 0, end: length, score: baseline };
+    for (let leftTrim = 0; leftTrim <= maxTrim + 0.01; leftTrim += step) {
+      for (let rightTrim = 0; rightTrim <= maxTrim + 0.01; rightTrim += step) {
+        const end = length - rightTrim;
+        if (end - leftTrim < nominalCell * count * 0.78) continue;
+        const rawScore = scoreGridBounds(edges, count, leftTrim, end);
+        const trimCells = (leftTrim + rightTrim) / Math.max(1, nominalCell);
+        const score = rawScore - trimCells * averageEdge * (photoMode ? 0.08 : 0.045);
+        if (score > best.score) best = { start: leftTrim, end, score };
+      }
+    }
+    const gain = best.score - baseline;
+    const threshold = Math.max(photoMode ? 0.8 : 0.42, averageEdge * (photoMode ? 0.12 : 0.065));
+    const changed =
+      gain > threshold &&
+      (best.start > nominalCell * 0.08 || length - best.end > nominalCell * 0.08);
+    return changed
+      ? { ...best, changed, gain }
+      : { start: 0, end: length, changed: false, gain };
+  }
+
+  function alignFrameToDetectedGrid(analysis, cols, rows) {
+    const xFit = fitAxisGridBounds(analysis.xEdges, cols, analysis.photoMode);
+    const yFit = fitAxisGridBounds(analysis.yEdges, rows, analysis.photoMode);
+    if (!xFit.changed && !yFit.changed) return false;
+    const left = xFit.changed ? xFit.start / analysis.width : 0;
+    const right = xFit.changed ? xFit.end / analysis.width : 1;
+    const top = yFit.changed ? yFit.start / analysis.height : 0;
+    const bottom = yFit.changed ? yFit.end / analysis.height : 1;
+    const projector = createFrameProjector(state.frame);
+    const nextFrame = [
+      projector(left, top),
+      projector(right, top),
+      projector(right, bottom),
+      projector(left, bottom),
+    ];
+    if (!frameIsConvex(nextFrame)) return false;
+    state.frame = nextFrame.map((point) => ({
+      x: clamp(point.x, 0, 1),
+      y: clamp(point.y, 0, 1),
+    }));
+    syncCropFromFrame();
+    return true;
+  }
+
+  function analyzeGridCanvas(canvas, photoMode) {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const xEdges = buildAxisEdges(imageData, "x", photoMode);
+    const yEdges = buildAxisEdges(imageData, "y", photoMode);
+    return {
+      canvas,
+      imageData,
+      width: canvas.width,
+      height: canvas.height,
+      photoMode,
+      xEdges,
+      yEdges,
+      xResult: photoMode
+        ? inferPhotoAxisCount(imageData, "x")
+        : inferAxisCount(xEdges, canvas.width),
+      yResult: photoMode
+        ? inferPhotoAxisCount(imageData, "y")
+        : inferAxisCount(yEdges, canvas.height),
+    };
+  }
+
+  function applyDetectedGrid(analysis) {
+    state.cols = clamp(analysis.xResult.count, 2, 200);
+    state.rows = clamp(analysis.yResult.count, 2, 200);
+    const cellX = analysis.width / state.cols;
+    const cellY = analysis.height / state.rows;
+    if (Math.max(cellX, cellY) / Math.max(0.01, Math.min(cellX, cellY)) > 1.45) {
+      if (state.rows < 8 && state.cols >= 8) {
+        state.rows = clamp(Math.round(analysis.height / cellX), 2, 200);
+      } else if (state.cols < 8 && state.rows >= 8) {
+        state.cols = clamp(Math.round(analysis.width / cellY), 2, 200);
+      } else if (analysis.xResult.confidence > analysis.yResult.confidence + 0.12) {
+        state.rows = clamp(Math.round(analysis.height / cellX), 2, 200);
+      } else if (analysis.yResult.confidence > analysis.xResult.confidence + 0.12) {
+        state.cols = clamp(Math.round(analysis.width / cellY), 2, 200);
+      }
+    }
+  }
+
   async function autoDetect(isInitial = false) {
     if (!state.image) return;
     readCrop();
@@ -1219,45 +1374,26 @@
     await sleepFrame();
 
     try {
-      const canvas = makeAnalysisCanvas();
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const rect = { width: canvas.width, height: canvas.height };
       const photoMode = activeSourceMode() === "photo";
-      const xEdges = buildAxisEdges(imageData, "x", photoMode);
-      const yEdges = buildAxisEdges(imageData, "y", photoMode);
-      const xResult = photoMode
-        ? inferPhotoAxisCount(imageData, "x")
-        : inferAxisCount(xEdges, canvas.width);
-      const yResult = photoMode
-        ? inferPhotoAxisCount(imageData, "y")
-        : inferAxisCount(yEdges, canvas.height);
+      const analysis = analyzeGridCanvas(makeAnalysisCanvas(), photoMode);
       if (token !== state.processingToken) return;
-
-      state.cols = clamp(xResult.count, 2, 200);
-      state.rows = clamp(yResult.count, 2, 200);
-
-      // Very elongated artwork is commonly a uniformly scaled grid. Reconcile implausible cell ratios.
-      const cellX = rect.width / state.cols;
-      const cellY = rect.height / state.rows;
-      if (Math.max(cellX, cellY) / Math.max(0.01, Math.min(cellX, cellY)) > 1.45) {
-        if (state.rows < 8 && state.cols >= 8) {
-          state.rows = clamp(Math.round(rect.height / cellX), 2, 200);
-        } else if (state.cols < 8 && state.rows >= 8) {
-          state.cols = clamp(Math.round(rect.width / cellY), 2, 200);
-        } else if (xResult.confidence > yResult.confidence + 0.12) {
-          state.rows = clamp(Math.round(rect.height / cellX), 2, 200);
-        } else if (yResult.confidence > xResult.confidence + 0.12) {
-          state.cols = clamp(Math.round(rect.width / cellY), 2, 200);
-        }
+      applyDetectedGrid(analysis);
+      const frameAligned = alignFrameToDetectedGrid(analysis, state.cols, state.rows);
+      if (frameAligned) {
+        drawSourceThumb();
+        await sleepFrame();
+        if (token !== state.processingToken) return;
       }
 
-      state.detectionConfidence = (xResult.confidence + yResult.confidence) / 2;
+      state.detectionConfidence =
+        (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
       elements.gridCols.value = state.cols;
       elements.gridRows.value = state.rows;
       elements.detectHint.textContent =
         state.detectionConfidence > 0.7
-          ? "修改行列数会立即更新图纸；“重新识别”只负责重新推测网格。"
+          ? frameAligned
+            ? "已根据格线同时校正框选与行列数；手动修改会立即更新图纸。"
+            : "行列数与框选已检查；手动修改会立即更新图纸。"
           : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
       if (isInitial) {
@@ -1465,6 +1601,35 @@
         nearest.lab = rgbToLab(nearest);
       } else {
         merged.push({ ...bucket });
+      }
+    }
+
+    const denoiseStrength = Number(elements.denoise.value);
+    const rareCountLimit = [0, 1, 2, 4][denoiseStrength];
+    const rareMergeDistance = threshold + [0, 5, 10, 14][denoiseStrength];
+    if (rareCountLimit) {
+      for (let index = merged.length - 1; index >= 0; index -= 1) {
+        const rare = merged[index];
+        if (rare.count > rareCountLimit || merged.length <= 1) continue;
+        let targetIndex = -1;
+        let targetDistance = Infinity;
+        merged.forEach((candidate, candidateIndex) => {
+          if (candidateIndex === index) return;
+          const distance = labDistance(rare.lab, candidate.lab);
+          if (distance < targetDistance) {
+            targetIndex = candidateIndex;
+            targetDistance = distance;
+          }
+        });
+        if (targetIndex < 0 || targetDistance > rareMergeDistance) continue;
+        const target = merged[targetIndex];
+        const count = target.count + rare.count;
+        target.r = (target.r * target.count + rare.r * rare.count) / count;
+        target.g = (target.g * target.count + rare.g * rare.count) / count;
+        target.b = (target.b * target.count + rare.b * rare.count) / count;
+        target.count = count;
+        target.lab = rgbToLab(target);
+        merged.splice(index, 1);
       }
     }
 
@@ -1848,24 +2013,27 @@
       target.className = "palette-target";
       const targetHeading = document.createElement("span");
       targetHeading.className = "mapping-label";
-      targetHeading.textContent = "图纸颜色";
+      targetHeading.textContent = `图纸颜色 #${index + 1}`;
 
       const targetColorRow = document.createElement("div");
       targetColorRow.className = "target-color-row";
-      const colorInput = document.createElement("input");
-      colorInput.type = "color";
-      colorInput.value = rgbToHex(color);
-      colorInput.dataset.action = "target-color";
-      colorInput.setAttribute("aria-label", `修改 ${color.name} 的图纸颜色`);
+      const colorButton = document.createElement("button");
+      colorButton.type = "button";
+      colorButton.className = "target-color-button";
+      colorButton.dataset.action = "open-color-editor";
+      colorButton.setAttribute("aria-label", `修改 ${color.name} 的图纸颜色`);
+      const colorSwatch = document.createElement("i");
+      colorSwatch.style.background = colorCss(color);
+      colorButton.append(colorSwatch);
       const targetMeta = document.createElement("span");
       const targetName = document.createElement("b");
       targetName.className = "target-name";
       targetName.textContent = color.name;
       const targetDetails = document.createElement("small");
       targetDetails.className = "target-details";
-      targetDetails.textContent = `${rgbToHex(color)} · ${color.count} 颗`;
+      targetDetails.textContent = `${color.count} 颗`;
       targetMeta.append(targetName, targetDetails);
-      targetColorRow.append(colorInput, targetMeta);
+      targetColorRow.append(colorButton, targetMeta);
 
       const codeLabel = document.createElement("label");
       codeLabel.className = "palette-code-field";
@@ -1936,7 +2104,7 @@
       fragment.append(card);
     });
     elements.paletteList.append(fragment);
-    elements.addPaletteButton.textContent = `＋ 添加图纸颜色（当前 ${state.palette.length} 项）`;
+    elements.addPaletteButton.textContent = "＋ 添加图纸颜色";
     elements.resetPaletteButton.disabled =
       !state.paletteEdited || !state.detectedPaletteSnapshot.length;
   }
@@ -2026,8 +2194,23 @@
     setLivePreviewPosition(state.previewPosition.x, state.previewPosition.y);
   }
 
+  function setLivePreviewCollapsed(collapsed) {
+    state.livePreviewCollapsed = Boolean(collapsed);
+    elements.livePatternPreview.classList.toggle("collapsed", state.livePreviewCollapsed);
+    elements.livePreviewToggle.textContent = state.livePreviewCollapsed ? "展开" : "收起";
+    elements.livePreviewToggle.setAttribute(
+      "aria-expanded",
+      String(!state.livePreviewCollapsed),
+    );
+    elements.livePreviewToggle.setAttribute(
+      "aria-label",
+      state.livePreviewCollapsed ? "展开实时图纸预览" : "收起实时图纸预览",
+    );
+    requestAnimationFrame(clampLivePreviewPosition);
+  }
+
   function startLivePreviewDrag(event) {
-    if (event.button > 0) return;
+    if (event.button > 0 || event.target.closest("button")) return;
     const previewRect = elements.livePatternPreview.getBoundingClientRect();
     const editorRect = elements.sourceEditor.getBoundingClientRect();
     const left = previewRect.left - editorRect.left;
@@ -2212,6 +2395,140 @@
       b: Number.parseInt(value.slice(4, 6), 16),
     };
     return { ...rgb, lab: rgbToLab(rgb) };
+  }
+
+  function rgbToHsv(color) {
+    const r = color.r / 255;
+    const g = color.g / 255;
+    const b = color.b / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    let h = 0;
+    if (delta) {
+      if (max === r) h = 60 * (((g - b) / delta) % 6);
+      else if (max === g) h = 60 * ((b - r) / delta + 2);
+      else h = 60 * ((r - g) / delta + 4);
+    }
+    if (h < 0) h += 360;
+    return {
+      h,
+      s: max ? delta / max : 0,
+      v: max,
+    };
+  }
+
+  function hsvToRgb(hsv) {
+    const h = ((hsv.h % 360) + 360) % 360;
+    const s = clamp(hsv.s, 0, 1);
+    const v = clamp(hsv.v, 0, 1);
+    const chroma = v * s;
+    const section = h / 60;
+    const secondary = chroma * (1 - Math.abs((section % 2) - 1));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (section < 1) [r, g] = [chroma, secondary];
+    else if (section < 2) [r, g] = [secondary, chroma];
+    else if (section < 3) [g, b] = [chroma, secondary];
+    else if (section < 4) [g, b] = [secondary, chroma];
+    else if (section < 5) [r, b] = [secondary, chroma];
+    else [r, b] = [chroma, secondary];
+    const offset = v - chroma;
+    const rgb = {
+      r: Math.round((r + offset) * 255),
+      g: Math.round((g + offset) * 255),
+      b: Math.round((b + offset) * 255),
+    };
+    return { ...rgb, lab: rgbToLab(rgb) };
+  }
+
+  function updateColorEditorUi({ syncHex = true } = {}) {
+    const draft = state.colorEditorDraft;
+    const rgb = hsvToRgb(draft);
+    elements.colorSvField.style.setProperty("--picker-hue", draft.h.toFixed(1));
+    elements.colorSvField.style.setProperty("--picker-x", `${(draft.s * 100).toFixed(2)}%`);
+    elements.colorSvField.style.setProperty("--picker-y", `${((1 - draft.v) * 100).toFixed(2)}%`);
+    elements.colorSvField.setAttribute("aria-valuenow", String(Math.round(draft.v * 100)));
+    elements.colorSvField.setAttribute(
+      "aria-valuetext",
+      `饱和度 ${Math.round(draft.s * 100)}%，明度 ${Math.round(draft.v * 100)}%`,
+    );
+    elements.colorHueInput.value = String(Math.round(draft.h));
+    elements.colorEditorPreview.style.background = colorCss(rgb);
+    if (syncHex) elements.colorHexInput.value = rgbToHex(rgb);
+  }
+
+  function closeColorEditor() {
+    state.colorEditorPointer = null;
+    state.colorEditorIndex = -1;
+    safeCloseModal(elements.colorEditorDialog);
+  }
+
+  function openColorEditor(index) {
+    const color = state.palette[index];
+    if (!color) return;
+    state.colorEditorIndex = index;
+    state.colorEditorDraft = rgbToHsv(color);
+    elements.colorEditorTitle.textContent = `${color.name} · 第 ${index + 1} 项`;
+    updateColorEditorUi();
+    safeShowModal(elements.colorEditorDialog);
+  }
+
+  function applyPaletteColor(index, rgb) {
+    const color = state.palette[index];
+    if (!color || !rgb) return;
+    const previousHex = rgbToHex(color);
+    Object.assign(color, rgb);
+    if (!color.codeCustomized || color.code === previousHex) {
+      color.code = rgbToHex(color);
+      color.codeCustomized = false;
+    }
+    state.paletteEdited = true;
+    elements.resetPaletteButton.disabled = !state.detectedPaletteSnapshot.length;
+    renderPattern();
+    renderLivePatternPreview();
+    renderPalette();
+  }
+
+  function applyColorEditor() {
+    const index = state.colorEditorIndex;
+    if (!state.palette[index]) {
+      closeColorEditor();
+      return;
+    }
+    const rgb = hsvToRgb(state.colorEditorDraft);
+    closeColorEditor();
+    applyPaletteColor(index, rgb);
+  }
+
+  function setColorSvFromPointer(event) {
+    const rect = elements.colorSvField.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    state.colorEditorDraft.s = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    state.colorEditorDraft.v = 1 - clamp((event.clientY - rect.top) / rect.height, 0, 1);
+    updateColorEditorUi();
+  }
+
+  function startColorSvPointer(event) {
+    if (event.button > 0) return;
+    state.colorEditorPointer = event.pointerId;
+    elements.colorSvField.setPointerCapture?.(event.pointerId);
+    setColorSvFromPointer(event);
+    event.preventDefault();
+  }
+
+  function moveColorSvPointer(event) {
+    if (state.colorEditorPointer !== event.pointerId) return;
+    setColorSvFromPointer(event);
+    event.preventDefault();
+  }
+
+  function finishColorSvPointer(event) {
+    if (state.colorEditorPointer !== event.pointerId) return;
+    state.colorEditorPointer = null;
+    elements.colorSvField.releasePointerCapture?.(event.pointerId);
+    event.preventDefault();
   }
 
   function normalizeColorCode(value, index) {
@@ -2731,7 +3048,58 @@
     elements.exportButton.addEventListener("click", () => {
       if (state.cells.length) safeShowModal(elements.exportDialog);
     });
-    elements.detectButton.addEventListener("click", () => autoDetect(false));
+    elements.colorEditorClose.addEventListener("click", closeColorEditor);
+    elements.colorEditorCancel.addEventListener("click", closeColorEditor);
+    elements.colorEditorApply.addEventListener("click", applyColorEditor);
+    elements.colorEditorDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeColorEditor();
+    });
+    elements.colorEditorDialog.addEventListener("click", (event) => {
+      if (event.target === elements.colorEditorDialog) closeColorEditor();
+    });
+    elements.colorSvField.addEventListener("pointerdown", startColorSvPointer);
+    elements.colorSvField.addEventListener("pointermove", moveColorSvPointer);
+    elements.colorSvField.addEventListener("pointerup", finishColorSvPointer);
+    elements.colorSvField.addEventListener("pointercancel", finishColorSvPointer);
+    elements.colorSvField.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? 0.05 : 0.01;
+      if (event.key === "ArrowLeft") state.colorEditorDraft.s -= step;
+      else if (event.key === "ArrowRight") state.colorEditorDraft.s += step;
+      else if (event.key === "ArrowDown") state.colorEditorDraft.v -= step;
+      else if (event.key === "ArrowUp") state.colorEditorDraft.v += step;
+      else return;
+      state.colorEditorDraft.s = clamp(state.colorEditorDraft.s, 0, 1);
+      state.colorEditorDraft.v = clamp(state.colorEditorDraft.v, 0, 1);
+      updateColorEditorUi();
+      event.preventDefault();
+    });
+    elements.colorHueInput.addEventListener("input", () => {
+      state.colorEditorDraft.h = Number(elements.colorHueInput.value) || 0;
+      updateColorEditorUi();
+    });
+    elements.colorHexInput.addEventListener("input", () => {
+      const rgb = hexToRgb(elements.colorHexInput.value);
+      if (!rgb) return;
+      state.colorEditorDraft = rgbToHsv(rgb);
+      updateColorEditorUi({ syncHex: false });
+    });
+    elements.colorHexInput.addEventListener("focusout", () => updateColorEditorUi());
+    elements.colorHexInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      applyColorEditor();
+    });
+    elements.detectButton.addEventListener("click", () => {
+      if (!state.image) return;
+      state.frame = defaultFrame();
+      state.sourcePan = { x: 0, y: 0 };
+      state.sourceZoom = 1;
+      suggestPhotoFrame();
+      syncCropFromFrame();
+      drawSourceThumb();
+      autoDetect(false);
+    });
     elements.rectModeButton.addEventListener("click", () => setFrameMode("rect"));
     elements.freeModeButton.addEventListener("click", () => setFrameMode("free"));
     elements.rotationInput.addEventListener("input", () => setRotation(elements.rotationInput.value));
@@ -2823,7 +3191,9 @@
         item.classList.toggle("active", item === card);
       });
       const action = event.target.closest("[data-action]")?.dataset.action;
-      if (action === "pick-match") {
+      if (action === "open-color-editor") {
+        openColorEditor(index);
+      } else if (action === "pick-match") {
         beginColorPick(index);
       } else if (action === "remove-match") {
         removePaletteMatch(index, Number(event.target.closest("[data-action]").dataset.matchIndex));
@@ -2837,23 +3207,7 @@
       const index = Number(card.dataset.index);
       const color = state.palette[index];
       if (!color) return;
-      if (event.target.dataset.action === "target-color") {
-        const rgb = hexToRgb(event.target.value);
-        if (!rgb) return;
-        const previousHex = rgbToHex(color);
-        Object.assign(color, rgb);
-        if (!color.codeCustomized || color.code === previousHex) {
-          color.code = rgbToHex(color);
-          color.codeCustomized = false;
-          card.querySelector('[data-action="color-code"]').value = color.code;
-        }
-        state.paletteEdited = true;
-        elements.resetPaletteButton.disabled = !state.detectedPaletteSnapshot.length;
-        card.querySelector(".target-details").textContent =
-          `${rgbToHex(color)} · ${color.count} 颗`;
-        renderPattern();
-        renderLivePatternPreview();
-      } else if (event.target.dataset.action === "color-code") {
+      if (event.target.dataset.action === "color-code") {
         color.code = event.target.value.slice(0, 12);
         color.codeCustomized = true;
         state.paletteEdited = true;
@@ -2887,6 +3241,10 @@
     elements.livePatternPreview.addEventListener("pointermove", moveLivePreviewDrag);
     elements.livePatternPreview.addEventListener("pointerup", finishLivePreviewDrag);
     elements.livePatternPreview.addEventListener("pointercancel", finishLivePreviewDrag);
+    elements.livePreviewToggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setLivePreviewCollapsed(!state.livePreviewCollapsed);
+    });
     elements.undoButton.addEventListener("click", undo);
     elements.redoButton.addEventListener("click", redo);
     elements.zoomOut.addEventListener("click", () => {
@@ -2952,7 +3310,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=23").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=29").catch(() => {});
     }
     window.addEventListener(
       "load",
