@@ -1,11 +1,11 @@
-const CACHE_NAME = "dougao-v29";
+const CACHE_NAME = "dougao-v30";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles.css?v=29",
-  "./app.js?v=29",
-  "./manifest.webmanifest?v=29",
+  "./styles.css?v=30",
+  "./app.js?v=30",
+  "./manifest.webmanifest?v=30",
   "./favicon.svg",
   "./og.png",
 ];
@@ -30,6 +30,23 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() =>
+          caches
+            .match(event.request)
+            .then((cached) => cached || caches.match("./index.html"))
+            .then((fallback) => fallback || Response.error()),
+        ),
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then(
       (cached) =>
@@ -40,11 +57,7 @@ self.addEventListener("fetch", (event) => {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
             return response;
           })
-          .catch(() =>
-            event.request.mode === "navigate"
-              ? caches.match("./").then((fallback) => fallback || Response.error())
-              : Response.error(),
-          ),
+          .catch(() => Response.error()),
     ),
   );
 });
