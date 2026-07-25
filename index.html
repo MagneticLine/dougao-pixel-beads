@@ -14,8 +14,8 @@
     <meta name="twitter:description" content="把模糊、压缩的像素图整理成能照着拼的清晰图纸。" />
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
-    <link rel="manifest" href="./manifest.webmanifest?v=6" />
-    <link rel="stylesheet" href="./styles.css?v=6" />
+    <link rel="manifest" href="./manifest.webmanifest?v=7" />
+    <link rel="stylesheet" href="./styles.css?v=7" />
   </head>
   <body>
     <header class="topbar">
@@ -107,7 +107,7 @@
                 <button class="secondary-button full" id="detectButton" type="button">
                   <span aria-hidden="true">✦</span> 重新自动识别
                 </button>
-                <p class="hint" id="detectHint">上传后将自动推测网格尺寸。</p>
+                <p class="hint" id="detectHint">上传后将自动推测网格尺寸；手动修改行列数会立即更新图纸。</p>
               </div>
             </div>
 
@@ -126,21 +126,15 @@
                   <input id="colorMerge" type="range" min="0" max="4" value="2" />
                   <small><i>更多原色</i><i>更少采购色</i></small>
                 </label>
-                <label class="select-field">
-                  <span>最多颜色</span>
-                  <select id="maxColors">
-                    <option value="12">12 色</option>
-                    <option value="18">18 色</option>
-                    <option value="24" selected>24 色</option>
-                    <option value="36">36 色</option>
-                    <option value="48">48 色</option>
-                    <option value="64">64 色</option>
-                  </select>
+                <label class="number-field">
+                  <span><b>最多颜色</b><small>可输入 1–256</small></span>
+                  <span class="number-input"><input id="maxColors" type="number" min="1" max="256" value="24" inputmode="numeric" /><i>色</i></span>
                 </label>
                 <label class="toggle-field">
                   <span><b>透明区域留空</b><small>适用于带透明背景的 PNG</small></span>
                   <input id="keepTransparent" type="checkbox" checked />
                 </label>
+                <p class="hint">本区参数修改后会自动重新生成，无需点击“重新自动识别”。</p>
               </div>
             </div>
 
@@ -218,6 +212,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=6"></script>
+    <script src="./app.js?v=7.2"></script>
   </body>
 </html>

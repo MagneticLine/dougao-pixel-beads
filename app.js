@@ -298,19 +298,30 @@
     return edges;
   }
 
-  function scoreGridCount(edges, count) {
+  function scoreGridCount(edges, count, nativeCount) {
     const length = edges.length;
     const cell = length / count;
-    if (cell < 1.45) return -Infinity;
+    if (cell < 1) return -Infinity;
+
+    // A one-source-pixel cell has no measurable interior. Keep it as a
+    // possible native pixel-art resolution, but prefer a larger repeating
+    // block whenever the edge profile provides real periodic evidence.
+    if (cell < 1.6) {
+      let total = 0;
+      for (let index = 1; index < length; index += 1) total += edges[index];
+      const nativeWeight = count === nativeCount && nativeCount === length ? 0.12 : 0.04;
+      return (total / Math.max(1, length - 1)) * nativeWeight;
+    }
+
     let boundary = 0;
     let inside = 0;
     let boundaryCount = 0;
     let insideCount = 0;
-    const radius = Math.max(1, Math.min(3, cell * 0.14));
+    const radius = cell >= 7 ? Math.min(3, Math.floor(cell * 0.14)) : 0;
 
     for (let i = 1; i < count; i += 1) {
       const at = i * cell;
-      for (let delta = -Math.floor(radius); delta <= Math.floor(radius); delta += 1) {
+      for (let delta = -radius; delta <= radius; delta += 1) {
         const index = clamp(Math.round(at + delta), 1, length - 1);
         boundary += edges[index];
         boundaryCount += 1;
@@ -325,25 +336,35 @@
     const contrast = boundary / Math.max(1, boundaryCount) - inside / Math.max(1, insideCount);
     const strength = boundary / Math.max(1, boundaryCount);
     const usefulRange = count >= 8 && count <= 120 ? 1 : 0.78;
-    const densityPenalty = Math.max(0, 2.2 - cell) * 4;
-    return (contrast * 0.75 + strength * 0.25 - densityPenalty) * usefulRange;
+    return (contrast * 0.92 + strength * 0.08) * usefulRange;
   }
 
   function inferAxisCount(edges, originalLength) {
-    if (originalLength <= 128 && originalLength >= 4) {
-      return { count: originalLength, confidence: 0.82, score: 1 };
-    }
-
-    const maxCount = Math.min(160, Math.floor(edges.length / 1.45));
+    const maxCount = Math.min(160, originalLength, Math.floor(edges.length));
     const candidates = [];
-    for (let count = 4; count <= maxCount; count += 1) {
-      candidates.push({ count, score: scoreGridCount(edges, count) });
+    for (let count = 2; count <= maxCount; count += 1) {
+      candidates.push({ count, score: scoreGridCount(edges, count, originalLength) });
     }
     candidates.sort((a, b) => b.score - a.score);
-    const best = candidates[0] || { count: 32, score: 0 };
+    let best = candidates[0] || { count: Math.min(32, originalLength), score: 0 };
+
+    // Compression can make a harmonic (for example 40 instead of 20) score
+    // fractionally higher. Prefer the simpler divisor when it explains nearly
+    // the same edge pattern; genuine one-pixel detail still keeps the denser
+    // candidate ahead.
+    for (const divisor of [2, 3, 4]) {
+      const simplerCount = Math.round(best.count / divisor);
+      if (simplerCount < 2 || Math.abs(best.count / divisor - simplerCount) > 0.08) continue;
+      const simpler = candidates.find((candidate) => candidate.count === simplerCount);
+      if (simpler && simpler.score > 0 && simpler.score >= best.score * 0.92) {
+        best = simpler;
+        break;
+      }
+    }
+
     const distinct = candidates.find((candidate) => Math.abs(candidate.count - best.count) > 2) || candidates[1] || best;
     const separation = best.score <= 0 ? 0 : (best.score - distinct.score) / Math.max(1, Math.abs(best.score));
-    const confidence = clamp(0.42 + separation * 1.6 + best.score / 100, 0.28, 0.94);
+    const confidence = clamp(0.36 + separation * 1.35 + best.score / 80, 0.25, 0.94);
     return { ...best, confidence };
   }
 
@@ -383,8 +404,8 @@
       elements.gridRows.value = state.rows;
       elements.detectHint.textContent =
         state.detectionConfidence > 0.7
-          ? `已识别为 ${state.cols} × ${state.rows}，建议检查边缘是否对齐。`
-          : `暂定 ${state.cols} × ${state.rows}；这张图较难判断，请重点检查行列数。`;
+          ? `已识别为 ${state.cols} × ${state.rows}。修改行列数会立即更新；此按钮只负责重新推测。`
+          : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
       if (isInitial) chooseInitialZoom();
       if (isInitial && state.detectionConfidence < 0.5) {
@@ -552,7 +573,8 @@
       }
     }
 
-    const maxColors = Number(elements.maxColors.value);
+    const maxColors = clamp(Math.round(Number(elements.maxColors.value) || 24), 1, 256);
+    elements.maxColors.value = maxColors;
     if (merged.length <= maxColors) return finalizePalette(merged);
 
     const centers = [merged[0]];
@@ -1193,7 +1215,12 @@
       input.addEventListener("input", cropDebounced);
     }
     for (const input of [elements.gridCols, elements.gridRows]) {
-      input.addEventListener("input", processDebounced);
+      input.addEventListener("input", () => {
+        const cols = clamp(Math.round(Number(elements.gridCols.value) || state.cols), 2, 200);
+        const rows = clamp(Math.round(Number(elements.gridRows.value) || state.rows), 2, 200);
+        elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新自动识别”会重新推测行列数。`;
+        processDebounced();
+      });
     }
     for (const input of [
       elements.denoise,

@@ -594,7 +594,7 @@ main {
 }
 
 .range-field > span,
-.select-field,
+.number-field,
 .toggle-field {
   display: flex;
   align-items: center;
@@ -627,17 +627,49 @@ main {
   font-style: normal;
 }
 
-.select-field {
+.number-field {
   margin-bottom: 17px;
 }
 
-.select-field select {
+.number-field > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.number-field small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.number-input {
+  display: flex;
+  align-items: center;
   min-width: 92px;
   height: 34px;
-  padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: white;
+  overflow: hidden;
+}
+
+.number-input input {
+  width: 64px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 9px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+}
+
+.number-input i {
+  padding-right: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
 }
 
 .toggle-field {
