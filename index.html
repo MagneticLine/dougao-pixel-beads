@@ -16,7 +16,7 @@
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.webmanifest?v=19" />
-    <link rel="stylesheet" href="./styles.css?v=19" />
+    <link rel="stylesheet" href="./styles.css?v=20" />
   </head>
   <body>
     <header class="topbar">
@@ -67,9 +67,9 @@
             </div>
             <span class="clipboard-copy">
               <b id="clipboardTitle">剪贴板里的图片也能用</b>
-              <small id="clipboardMeta">按 Ctrl/⌘ + V，或点击右侧检查剪贴板</small>
+              <small id="clipboardMeta">已授权会自动读取；首次使用请点击右侧授权</small>
             </span>
-            <button class="clipboard-button" id="clipboardButton" type="button">检查并粘贴</button>
+            <button class="clipboard-button" id="clipboardButton" type="button">粘贴剪贴板图片</button>
           </div>
           <small>支持 PNG、JPG、WebP、GIF、BMP · 建议小于 20 MB</small>
         </div>
@@ -114,7 +114,7 @@
                 </div>
                 <button class="calibration-link" id="openCalibrateButton" type="button">
                   <span aria-hidden="true">⌖</span>
-                  <span><b>在大图上校准网格</b><small>拖框、看格线、微调旋转都在原图上完成</small></span>
+                  <span><b>在大图上校准网格</b><small>拖图、调角点、看格线都在原图上完成</small></span>
                   <i aria-hidden="true">→</i>
                 </button>
                 <div class="crop-grid" hidden>
@@ -198,9 +198,9 @@
                 <canvas
                   id="sourceCanvas"
                   tabindex="0"
-                  aria-label="大图网格校准；拖动框内可移动，拖动四角可调整框选"
+                  aria-label="大图网格校准；拖动图片可移动，只有拖动四个角点才会调整框选"
                 ></canvas>
-                <div class="editor-tip"><b>拖角点调整范围</b><span>拖框内移动 · 网格实时更新</span></div>
+                <div class="editor-tip"><b>拖动图片对齐网格</b><span>只有四个角点会调整框选 · 网格实时更新</span></div>
               </div>
               <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
             </div>
@@ -263,6 +263,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=19"></script>
+    <script src="./app.js?v=20"></script>
   </body>
 </html>

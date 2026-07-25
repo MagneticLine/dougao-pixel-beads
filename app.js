@@ -84,6 +84,7 @@
     frameMode: "rect",
     rotation: 0,
     sourceView: null,
+    sourcePan: { x: 0, y: 0 },
     sourcePixelCache: null,
     clipboardFile: null,
     clipboardUrl: "",
@@ -121,17 +122,18 @@
   ];
 
   function viewPointToSource(point) {
-    if (!state.rotation || !state.image) return point;
+    if (!state.image) return point;
     const radians = (state.rotation * Math.PI) / 180;
     const cosine = Math.cos(radians);
     const sine = Math.sin(radians);
     const width = state.image.naturalWidth;
     const height = state.image.naturalHeight;
-    const dx = (point.x - 0.5) * width;
-    const dy = (point.y - 0.5) * height;
+    const zoom = Math.max(0.01, state.sourceZoom);
+    const dx = (point.x - 0.5 - state.sourcePan.x) * width;
+    const dy = (point.y - 0.5 - state.sourcePan.y) * height;
     return {
-      x: (cosine * dx + sine * dy) / width + 0.5,
-      y: (-sine * dx + cosine * dy) / height + 0.5,
+      x: (cosine * dx + sine * dy) / (width * zoom) + 0.5,
+      y: (-sine * dx + cosine * dy) / (height * zoom) + 0.5,
     };
   }
 
@@ -186,6 +188,21 @@
       if (!quiet) showToast("无法读取剪贴板；请按 Ctrl/⌘ + V 粘贴");
     }
     return false;
+  }
+
+  async function detectGrantedClipboardImage() {
+    if (elements.hero.hidden || state.clipboardFile || !navigator.clipboard?.read) return;
+    if (!navigator.permissions?.query) return;
+    try {
+      const permission = await navigator.permissions.query({ name: "clipboard-read" });
+      if (permission.state === "granted") {
+        await readClipboardImage({ quiet: true });
+      } else if (permission.state === "prompt") {
+        elements.clipboardMeta.textContent = "首次点击会由浏览器询问读取权限；也可直接按 Ctrl/⌘ + V";
+      }
+    } catch {
+      // Permission querying is not implemented consistently; direct paste still works.
+    }
   }
 
   function getSettings() {
@@ -271,13 +288,17 @@
   function getFramePixels() {
     const width = state.image?.naturalWidth || 1;
     const height = state.image?.naturalHeight || 1;
-    return state.frame.map((point) => ({ x: point.x * width, y: point.y * height }));
+    return state.frame.map(viewPointToSource).map((point) => ({
+      x: point.x * width,
+      y: point.y * height,
+    }));
   }
 
   function getCropRect() {
     const { naturalWidth: width, naturalHeight: height } = state.image;
-    const xs = state.frame.map((point) => point.x * width);
-    const ys = state.frame.map((point) => point.y * height);
+    const sourceFrame = state.frame.map(viewPointToSource);
+    const xs = sourceFrame.map((point) => point.x * width);
+    const ys = sourceFrame.map((point) => point.y * height);
     const x = Math.round(Math.min(...xs));
     const y = Math.round(Math.min(...ys));
     const right = Math.round(width - Math.max(...xs));
@@ -532,6 +553,7 @@
       state.frameMode = "rect";
       state.rotation = 0;
       state.sourceZoom = 1;
+      state.sourcePan = { x: 0, y: 0 };
       state.view = "source";
       state.sourcePixelCache = null;
       state.detectedMode = detectImageKind();
@@ -542,6 +564,7 @@
       syncCropFromFrame();
       elements.hero.hidden = true;
       elements.workspace.hidden = false;
+      document.body.classList.add("editing");
       elements.rotationInput.value = "0";
       elements.rotationValue.value = "0.0°";
       updateFrameMode();
@@ -626,52 +649,37 @@
     };
   }
 
-  function fitSourceFrame() {
-    if (!state.image || elements.sourceEditor.hidden) return;
-    const box = elements.sourceEditor.getBoundingClientRect();
-    if (box.width < 2 || box.height < 2) return;
-    const baseScale = Math.min(
-      box.width / state.image.naturalWidth,
-      box.height / state.image.naturalHeight,
-    );
-    const xs = state.frame.map((point) => point.x);
-    const ys = state.frame.map((point) => point.y);
-    const frameWidth = (Math.max(...xs) - Math.min(...xs)) * state.image.naturalWidth * baseScale;
-    const frameHeight = (Math.max(...ys) - Math.min(...ys)) * state.image.naturalHeight * baseScale;
-    state.sourceZoom = clamp(
-      Math.min((box.width * 0.72) / Math.max(1, frameWidth), (box.height * 0.72) / Math.max(1, frameHeight)),
-      0.75,
-      5,
-    );
-    drawSourceThumb();
+  function sizeSourceEditor() {
+    if (!state.image || state.view === "result") {
+      elements.canvasStage.style.removeProperty("height");
+      return;
+    }
+    const width = Math.max(1, elements.canvasStage.clientWidth);
+    const aspect = state.image.naturalHeight / Math.max(1, state.image.naturalWidth);
+    const height = `${Math.max(240, Math.round(width * aspect))}px`;
+    if (elements.canvasStage.style.height !== height) elements.canvasStage.style.height = height;
   }
 
   function drawSourceThumb() {
     if (!state.image) return;
+    sizeSourceEditor();
     const canvas = elements.sourceCanvas;
     const box = elements.sourceEditor.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.max(260, Math.round(box.width * dpr));
-    canvas.height = Math.max(180, Math.round(box.height * dpr));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2, 3200 / Math.max(box.width, box.height));
+    const pixelWidth = Math.max(260, Math.round(box.width * dpr));
+    const pixelHeight = Math.max(180, Math.round(box.height * dpr));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const baseScale = Math.min(
-      canvas.width / state.image.naturalWidth,
-      canvas.height / state.image.naturalHeight,
-    );
-    const width = state.image.naturalWidth * baseScale * state.sourceZoom;
-    const height = state.image.naturalHeight * baseScale * state.sourceZoom;
-    const frameCenterX = state.frame.reduce((sum, point) => sum + point.x, 0) / state.frame.length;
-    const frameCenterY = state.frame.reduce((sum, point) => sum + point.y, 0) / state.frame.length;
-    const x = canvas.width / 2 - frameCenterX * width;
-    const y = canvas.height / 2 - frameCenterY * height;
-    state.sourceView = { x, y, width, height, dpr };
+    const width = canvas.width * state.sourceZoom;
+    const height = canvas.height * state.sourceZoom;
+    const x = (canvas.width - width) / 2 + state.sourcePan.x * canvas.width;
+    const y = (canvas.height - height) / 2 + state.sourcePan.y * canvas.height;
+    state.sourceView = { x: 0, y: 0, width: canvas.width, height: canvas.height, dpr };
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(x, y, width, height);
-    ctx.clip();
     ctx.translate(x + width / 2, y + height / 2);
     ctx.rotate((state.rotation * Math.PI) / 180);
     ctx.drawImage(state.image, -width / 2, -height / 2, width, height);
@@ -682,7 +690,7 @@
     ctx.save();
     ctx.fillStyle = "rgba(18, 20, 19, 0.58)";
     ctx.beginPath();
-    ctx.rect(x, y, width, height);
+    ctx.rect(0, 0, canvas.width, canvas.height);
     ctx.moveTo(frame[0].x, frame[0].y);
     for (let index = 1; index < frame.length; index += 1) ctx.lineTo(frame[index].x, frame[index].y);
     ctx.closePath();
@@ -737,8 +745,11 @@
     ctx.restore();
     canvas.setAttribute(
       "aria-label",
-      `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度，${state.frameMode === "rect" ? "矩形" : "自由四角"}模式`,
+      `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度；拖动图片可移动，只有角点会调整框选`,
     );
+    canvas.dataset.panX = state.sourcePan.x.toFixed(4);
+    canvas.dataset.panY = state.sourcePan.y.toFixed(4);
+    canvas.dataset.sourceZoom = state.sourceZoom.toFixed(2);
     if (state.view !== "result") {
       elements.zoomValue.value = `${Math.round(state.sourceZoom * 100)}%`;
     }
@@ -881,18 +892,34 @@
       }
     });
     state.frameDrag = {
-      type: corner >= 0 ? "corner" : pointInsideFrame(point) ? "move" : "create",
+      type: corner >= 0 ? "corner" : "pan",
       corner,
       start: { x: point.x, y: point.y },
       initial: state.frame.map((framePoint) => ({ ...framePoint })),
+      initialPan: { ...state.sourcePan },
     };
     elements.sourceCanvas.setPointerCapture?.(event.pointerId);
     event.preventDefault();
   }
 
   function moveFramePointer(event) {
-    if (!state.frameDrag) return;
     const point = pointerImagePoint(event);
+    if (!state.frameDrag) {
+      const handleRadius = 18 * state.sourceView.dpr;
+      let corner = -1;
+      let nearest = Infinity;
+      state.frame.forEach((framePoint, index) => {
+        const canvasPoint = canvasFramePoint(framePoint);
+        const distance = Math.hypot(canvasPoint.x - point.canvasX, canvasPoint.y - point.canvasY);
+        if (distance < handleRadius && distance < nearest) {
+          corner = index;
+          nearest = distance;
+        }
+      });
+      elements.sourceCanvas.style.cursor =
+        corner < 0 ? "grab" : corner % 2 === 0 ? "nwse-resize" : "nesw-resize";
+      return;
+    }
     const drag = state.frameDrag;
     if (drag.type === "corner") {
       if (state.frameMode === "rect") {
@@ -914,34 +941,16 @@
         next[drag.corner] = { x: point.x, y: point.y };
         if (frameIsConvex(next)) state.frame = next;
       }
-    } else if (drag.type === "move") {
+      syncCropFromFrame();
+    } else {
       const deltaX = point.x - drag.start.x;
       const deltaY = point.y - drag.start.y;
-      const minX = Math.min(...drag.initial.map((framePoint) => framePoint.x));
-      const maxX = Math.max(...drag.initial.map((framePoint) => framePoint.x));
-      const minY = Math.min(...drag.initial.map((framePoint) => framePoint.y));
-      const maxY = Math.max(...drag.initial.map((framePoint) => framePoint.y));
-      const safeX = clamp(deltaX, -minX, 1 - maxX);
-      const safeY = clamp(deltaY, -minY, 1 - maxY);
-      state.frame = drag.initial.map((framePoint) => ({
-        x: framePoint.x + safeX,
-        y: framePoint.y + safeY,
-      }));
-    } else {
-      const left = Math.min(drag.start.x, point.x);
-      const right = Math.max(drag.start.x, point.x);
-      const top = Math.min(drag.start.y, point.y);
-      const bottom = Math.max(drag.start.y, point.y);
-      if (right - left >= 0.03 && bottom - top >= 0.03) {
-        state.frame = [
-          { x: left, y: top },
-          { x: right, y: top },
-          { x: right, y: bottom },
-          { x: left, y: bottom },
-        ];
-      }
+      const limit = Math.max(1, (state.sourceZoom + 1) / 2);
+      state.sourcePan = {
+        x: clamp(drag.initialPan.x + deltaX, -limit, limit),
+        y: clamp(drag.initialPan.y + deltaY, -limit, limit),
+      };
     }
-    syncCropFromFrame();
     drawSourceThumb();
     event.preventDefault();
   }
@@ -950,6 +959,7 @@
     if (!state.frameDrag) return;
     state.frameDrag = null;
     elements.sourceCanvas.releasePointerCapture?.(event.pointerId);
+    elements.sourceCanvas.style.cursor = "grab";
     syncCropFromFrame();
     drawSourceThumb();
     processImage({ resetHistory: true });
@@ -1180,7 +1190,6 @@
           : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
       if (isInitial) {
-        fitSourceFrame();
         chooseInitialZoom();
       }
       if (isInitial && state.detectionConfidence < 0.5) {
@@ -1703,7 +1712,8 @@
     elements.resultTab.setAttribute("aria-selected", String(result));
     elements.originalTab.setAttribute("aria-selected", String(!result));
     elements.zoomValue.value = `${Math.round((result ? state.zoom : state.sourceZoom) * 100)}%`;
-    if (!result) requestAnimationFrame(drawSourceThumb);
+    if (result) sizeSourceEditor();
+    else requestAnimationFrame(drawSourceThumb);
   }
 
   function updateZoom(next) {
@@ -1998,7 +2008,8 @@
         loadFile(state.clipboardFile);
         return;
       }
-      await readClipboardImage();
+      const found = await readClipboardImage();
+      if (found && state.clipboardFile) loadFile(state.clipboardFile);
     });
 
     for (const type of ["dragenter", "dragover"]) {
@@ -2022,12 +2033,7 @@
           ?.getAsFile();
       if (!file) return;
       event.preventDefault();
-      if (!elements.workspace.hidden) {
-        loadFile(file);
-        return;
-      }
-      setClipboardCandidate(file);
-      showToast("已检测到剪贴板图片，确认缩略图后点击使用");
+      loadFile(file);
     });
 
     elements.helpButton.addEventListener("click", () => safeShowModal(elements.helpDialog));
@@ -2059,6 +2065,8 @@
     elements.resetFrameButton.addEventListener("click", () => {
       if (!state.image) return;
       state.frame = defaultFrame();
+      state.sourcePan = { x: 0, y: 0 };
+      state.sourceZoom = 1;
       suggestPhotoFrame();
       syncCropFromFrame();
       drawSourceThumb();
@@ -2079,14 +2087,11 @@
       const amount = event.shiftKey ? 0.01 : 0.0025;
       const deltaX = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0;
       const deltaY = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
-      const minX = Math.min(...state.frame.map((point) => point.x));
-      const maxX = Math.max(...state.frame.map((point) => point.x));
-      const minY = Math.min(...state.frame.map((point) => point.y));
-      const maxY = Math.max(...state.frame.map((point) => point.y));
-      const safeX = clamp(deltaX, -minX, 1 - maxX);
-      const safeY = clamp(deltaY, -minY, 1 - maxY);
-      state.frame = state.frame.map((point) => ({ x: point.x + safeX, y: point.y + safeY }));
-      syncCropFromFrame();
+      const limit = Math.max(1, (state.sourceZoom + 1) / 2);
+      state.sourcePan = {
+        x: clamp(state.sourcePan.x + deltaX, -limit, limit),
+        y: clamp(state.sourcePan.y + deltaY, -limit, limit),
+      };
       drawSourceThumb();
       processDebounced();
       event.preventDefault();
@@ -2178,18 +2183,11 @@
       "resize",
       debounce(() => {
         if (!state.image) return;
+        sizeSourceEditor();
         drawSourceThumb();
       }, 120),
     );
-    window.addEventListener("focus", async () => {
-      if (elements.hero.hidden || state.clipboardFile || !navigator.permissions?.query) return;
-      try {
-        const permission = await navigator.permissions.query({ name: "clipboard-read" });
-        if (permission.state === "granted") await readClipboardImage({ quiet: true });
-      } catch {
-        // Clipboard permission querying is optional; Ctrl/⌘ + V still works.
-      }
-    });
+    window.addEventListener("focus", detectGrantedClipboardImage);
     window.addEventListener("keydown", (event) => {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier || elements.workspace.hidden) return;
@@ -2207,8 +2205,9 @@
     restoreSettings();
     bindEvents();
     updateFrameMode();
+    requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=19").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=20").catch(() => {});
     }
     window.addEventListener(
       "load",
