@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=19" />
-    <link rel="stylesheet" href="./styles.css?v=20" />
+    <link rel="manifest" href="./manifest.webmanifest?v=21" />
+    <link rel="stylesheet" href="./styles.css?v=21" />
   </head>
   <body>
     <header class="topbar">
@@ -112,25 +112,26 @@
                   </label>
                   <button class="text-button frame-reset" id="resetFrameButton" type="button">重置框选</button>
                 </div>
-                <button class="calibration-link" id="openCalibrateButton" type="button">
-                  <span aria-hidden="true">⌖</span>
-                  <span><b>在大图上校准网格</b><small>拖图、调角点、看格线都在原图上完成</small></span>
-                  <i aria-hidden="true">→</i>
-                </button>
+                <p class="calibration-note">
+                  <b>校准说明</b>
+                  <span>在右侧“校准原图”中拖动图片、调整角点；格线和图纸预览会随结果更新。</span>
+                </p>
                 <div class="crop-grid" hidden>
                   <label>左 <input id="cropLeft" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>右 <input id="cropRight" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>上 <input id="cropTop" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>下 <input id="cropBottom" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                 </div>
-                <div class="field-row">
-                  <label>列数 <small>可滚轮</small><input id="gridCols" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
-                  <span>×</span>
-                  <label>行数 <small>可滚轮</small><input id="gridRows" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
+                <div class="grid-detect-row">
+                  <div class="field-row">
+                    <label>列数 <small>可滚轮</small><input id="gridCols" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
+                    <span>×</span>
+                    <label>行数 <small>可滚轮</small><input id="gridRows" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
+                  </div>
+                  <button class="secondary-button detect-compact" id="detectButton" type="button">
+                    <span aria-hidden="true">✦</span> 重新识别
+                  </button>
                 </div>
-                <button class="secondary-button full" id="detectButton" type="button">
-                  <span aria-hidden="true">✦</span> 重新自动识别
-                </button>
                 <p class="hint" id="detectHint">上传后将自动推测网格尺寸；手动修改行列数会立即更新图纸。</p>
               </div>
             </div>
@@ -142,23 +143,29 @@
               <div class="section-body">
                 <label class="range-field">
                   <span>去杂色强度 <output id="denoiseValue">标准</output></span>
-                  <input id="denoise" type="range" min="0" max="3" value="2" />
+                  <div class="range-track-wrap">
+                    <input id="denoise" type="range" min="0" max="3" value="2" />
+                    <span class="range-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                  </div>
                   <small><i>保留细节</i><i>边缘干净</i></small>
                 </label>
                 <label class="range-field">
                   <span>近似色合并 <output id="mergeValue">适中</output></span>
-                  <input id="colorMerge" type="range" min="0" max="4" value="2" />
+                  <div class="range-track-wrap">
+                    <input id="colorMerge" type="range" min="0" max="4" value="2" />
+                    <span class="range-ticks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                  </div>
                   <small><i>更多原色</i><i>更少采购色</i></small>
                 </label>
-                <label class="number-field">
-                  <span><b>最多颜色</b><small>可输入 1–256</small></span>
-                  <span class="number-input"><input id="maxColors" type="number" min="1" max="256" value="24" inputmode="numeric" /><i>色</i></span>
-                </label>
+                <div class="number-field color-count-field">
+                  <span><b>识别颜色</b><small id="detectedColorHint">由算法根据图片自动计算</small></span>
+                  <output class="color-count-output"><span id="detectedColorCount">—</span><i>色</i></output>
+                </div>
                 <label class="toggle-field">
                   <span><b>透明区域留空</b><small>适用于带透明背景的 PNG</small></span>
                   <input id="keepTransparent" type="checkbox" checked />
                 </label>
-                <p class="hint">本区参数修改后会自动重新生成，无需点击“重新自动识别”。</p>
+                <p class="hint">本区参数修改后会自动重新生成，无需点击“重新识别”。</p>
               </div>
             </div>
 
@@ -201,6 +208,11 @@
                   aria-label="大图网格校准；拖动图片可移动，只有拖动四个角点才会调整框选"
                 ></canvas>
                 <div class="editor-tip"><b>拖动图片对齐网格</b><span>只有四个角点会调整框选 · 网格实时更新</span></div>
+                <aside class="live-pattern-preview" aria-label="实时图纸预览">
+                  <header><b>实时图纸</b><small id="livePreviewMeta">等待识别</small></header>
+                  <div><canvas id="livePatternCanvas" aria-label="随校准结果更新的拼豆图纸预览"></canvas></div>
+                  <p>松开拖动后自动更新</p>
+                </aside>
               </div>
               <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
             </div>
@@ -263,6 +275,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=20"></script>
+    <script src="./app.js?v=21"></script>
   </body>
 </html>

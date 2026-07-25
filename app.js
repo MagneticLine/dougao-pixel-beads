@@ -26,7 +26,6 @@
     canvasStage: $("#canvasStage"),
     previewPanel: $(".preview-panel"),
     calibrationBar: $("#calibrationBar"),
-    openCalibrateButton: $("#openCalibrateButton"),
     rectModeButton: $("#rectModeButton"),
     freeModeButton: $("#freeModeButton"),
     rotationInput: $("#rotationInput"),
@@ -47,9 +46,12 @@
     denoiseValue: $("#denoiseValue"),
     colorMerge: $("#colorMerge"),
     mergeValue: $("#mergeValue"),
-    maxColors: $("#maxColors"),
+    detectedColorCount: $("#detectedColorCount"),
+    detectedColorHint: $("#detectedColorHint"),
     keepTransparent: $("#keepTransparent"),
     paletteList: $("#paletteList"),
+    livePatternCanvas: $("#livePatternCanvas"),
+    livePreviewMeta: $("#livePreviewMeta"),
     resultTab: $("#resultTab"),
     originalTab: $("#originalTab"),
     undoButton: $("#undoButton"),
@@ -220,7 +222,6 @@
         JSON.stringify({
           denoise: elements.denoise.value,
           merge: elements.colorMerge.value,
-          maxColors: elements.maxColors.value,
           keepTransparent: elements.keepTransparent.checked,
         }),
       );
@@ -233,7 +234,6 @@
     const saved = getSettings();
     if (saved.denoise != null) elements.denoise.value = saved.denoise;
     if (saved.merge != null) elements.colorMerge.value = saved.merge;
-    if (saved.maxColors != null) elements.maxColors.value = saved.maxColors;
     if (saved.keepTransparent != null) elements.keepTransparent.checked = saved.keepTransparent;
     updateRangeLabels();
   }
@@ -696,6 +696,8 @@
     ctx.closePath();
     ctx.fill("evenodd");
 
+    ctx.shadowColor = "rgba(5, 11, 13, 0.82)";
+    ctx.shadowBlur = 1.4 * dpr;
     for (let col = 0; col <= state.cols; col += 1) {
       const u = col / state.cols;
       const start = canvasFramePoint(projector(u, 0));
@@ -719,25 +721,33 @@
       ctx.stroke();
     }
 
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2.2 * dpr;
+    const traceFrame = () => {
+      ctx.beginPath();
+      ctx.moveTo(frame[0].x, frame[0].y);
+      for (let index = 1; index < frame.length; index += 1) ctx.lineTo(frame[index].x, frame[index].y);
+      ctx.closePath();
+    };
+    ctx.shadowColor = "transparent";
+    ctx.lineJoin = "round";
     ctx.setLineDash([]);
-    ctx.beginPath();
-    ctx.moveTo(frame[0].x, frame[0].y);
-    for (let index = 1; index < frame.length; index += 1) ctx.lineTo(frame[index].x, frame[index].y);
-    ctx.closePath();
+    ctx.strokeStyle = "rgba(4, 12, 16, 0.94)";
+    ctx.lineWidth = 6.5 * dpr;
+    traceFrame();
+    ctx.stroke();
+    ctx.strokeStyle = "#19ddff";
+    ctx.lineWidth = 2.6 * dpr;
+    traceFrame();
     ctx.stroke();
     frame.forEach((point, index) => {
-      ctx.fillStyle = "#ffffff";
-      ctx.strokeStyle =
-        state.frameMode === "free" ? (index === 0 ? "#e7b63e" : "#39795f") : "#427ca4";
-      ctx.lineWidth = 2 * dpr;
+      ctx.fillStyle = state.frameMode === "free" && index === 0 ? "#ff735f" : "#ffe34f";
+      ctx.strokeStyle = "rgba(4, 12, 16, 0.96)";
+      ctx.lineWidth = 3 * dpr;
       ctx.beginPath();
       if (state.frameMode === "rect") {
-        const size = 11 * dpr;
+        const size = 14 * dpr;
         ctx.rect(point.x - size / 2, point.y - size / 2, size, size);
       } else {
-        ctx.arc(point.x, point.y, 6.5 * dpr, 0, Math.PI * 2);
+        ctx.arc(point.x, point.y, 8 * dpr, 0, Math.PI * 2);
       }
       ctx.fill();
       ctx.stroke();
@@ -1260,14 +1270,57 @@
             }
           }
         } else {
-          for (const offsetY of [-0.2, -0.1, 0, 0.1, 0.2]) {
-            for (const offsetX of [-0.2, -0.1, 0, 0.1, 0.2]) {
-              const point = viewPointToSource(
-                projector((col + 0.5 + offsetX) / cols, (row + 0.5 + offsetY) / rows),
-              );
-              colors.push(readSourcePixel(source, point.x, point.y));
+          // A slightly inaccurate frame should not push the sample onto a grid line.
+          // Test several nearby inner patches and keep the most color-stable one.
+          const candidateShifts = [
+            [0, 0],
+            [-0.17, 0],
+            [0.17, 0],
+            [0, -0.17],
+            [0, 0.17],
+          ];
+          let bestScore = Infinity;
+          let bestColors = [];
+          for (const [shiftX, shiftY] of candidateShifts) {
+            const candidateColors = [];
+            for (const offsetY of [-0.14, 0, 0.14]) {
+              for (const offsetX of [-0.14, 0, 0.14]) {
+                const point = viewPointToSource(
+                  projector(
+                    (col + 0.5 + shiftX + offsetX) / cols,
+                    (row + 0.5 + shiftY + offsetY) / rows,
+                  ),
+                );
+                candidateColors.push(readSourcePixel(source, point.x, point.y));
+              }
+            }
+            const opaque = candidateColors.filter((color) => color[3] >= 20);
+            let variability = 0;
+            if (opaque.length) {
+              const center = [
+                median(opaque.map((color) => color[0])),
+                median(opaque.map((color) => color[1])),
+                median(opaque.map((color) => color[2])),
+              ];
+              variability =
+                median(
+                  opaque.map(
+                    (color) =>
+                      Math.abs(color[0] - center[0]) +
+                      Math.abs(color[1] - center[1]) +
+                      Math.abs(color[2] - center[2]),
+                  ),
+                ) / 3;
+            }
+            const distancePenalty = Math.hypot(shiftX, shiftY) * 14;
+            const coveragePenalty = (1 - opaque.length / candidateColors.length) * 4;
+            const score = variability + distancePenalty + coveragePenalty;
+            if (score < bestScore) {
+              bestScore = score;
+              bestColors = candidateColors;
             }
           }
+          colors.push(...bestColors);
         }
 
         colors.sort(
@@ -1354,8 +1407,9 @@
       }
     }
 
-    const maxColors = clamp(Math.round(Number(elements.maxColors.value) || 24), 1, 256);
-    elements.maxColors.value = maxColors;
+    // The palette size is discovered from the merged color clusters.
+    // 256 is only a pathological-input safety ceiling, not a target color count.
+    const maxColors = 256;
     if (merged.length <= maxColors) return finalizePalette(merged);
 
     const centers = [merged[0]];
@@ -1663,6 +1717,72 @@
     elements.paletteList.append(fragment);
   }
 
+  function renderLivePatternPreview() {
+    const canvas = elements.livePatternCanvas;
+    if (!canvas) return;
+    if (!state.cells.length || !state.palette.length) {
+      canvas.width = 1;
+      canvas.height = 1;
+      canvas.style.width = "1px";
+      canvas.style.height = "1px";
+      elements.livePreviewMeta.textContent = "等待识别";
+      return;
+    }
+
+    const maxWidth = 190;
+    const maxHeight = 220;
+    const cell = Math.max(1.2, Math.min(maxWidth / state.cols, maxHeight / state.rows));
+    const logicalWidth = state.cols * cell;
+    const logicalHeight = state.rows * cell;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.round(logicalWidth * scale));
+    canvas.height = Math.max(1, Math.round(logicalHeight * scale));
+    canvas.style.width = `${Math.round(logicalWidth)}px`;
+    canvas.style.height = `${Math.round(logicalHeight)}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = "#fffefb";
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+
+    for (let row = 0; row < state.rows; row += 1) {
+      for (let col = 0; col < state.cols; col += 1) {
+        const paletteIndex = state.cells[row * state.cols + col];
+        const x = col * cell;
+        const y = row * cell;
+        if (paletteIndex < 0 || !state.palette[paletteIndex]) {
+          ctx.fillStyle = (row + col) % 2 ? "#f2f0eb" : "#e3e0d9";
+        } else {
+          ctx.fillStyle = colorCss(state.palette[paletteIndex]);
+        }
+        ctx.fillRect(x, y, cell + 0.25, cell + 0.25);
+      }
+    }
+
+    if (cell >= 3) {
+      ctx.lineWidth = Math.max(0.45, 0.75 / scale);
+      for (let col = 0; col <= state.cols; col += 1) {
+        const x = col * cell;
+        ctx.strokeStyle = col % 5 === 0 ? "rgba(22,25,22,.52)" : "rgba(22,25,22,.16)";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, logicalHeight);
+        ctx.stroke();
+      }
+      for (let row = 0; row <= state.rows; row += 1) {
+        const y = row * cell;
+        ctx.strokeStyle = row % 5 === 0 ? "rgba(22,25,22,.52)" : "rgba(22,25,22,.16)";
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(logicalWidth, y);
+        ctx.stroke();
+      }
+    }
+
+    const usedColors = state.palette.filter((color) => color.count > 0).length;
+    elements.livePreviewMeta.textContent = `${state.cols} × ${state.rows} · ${usedColors} 色`;
+  }
+
   function renderStatus() {
     const filled = state.cells.filter((cell) => cell >= 0).length;
     const usedColors = state.palette.filter((color) => color.count > 0).length;
@@ -1670,6 +1790,8 @@
       state.confidences.reduce((sum, value) => sum + value, 0) / Math.max(1, state.confidences.length);
     elements.gridStatus.textContent = `${state.cols} × ${state.rows} · ${filled.toLocaleString()} 颗`;
     elements.colorStatus.textContent = `${usedColors} 种颜色`;
+    elements.detectedColorCount.textContent = String(usedColors);
+    elements.detectedColorHint.textContent = `算法当前识别到 ${usedColors} 种颜色`;
     const confidence = (averageConfidence + state.detectionConfidence) / 2;
     elements.confidenceStatus.textContent =
       confidence > 0.78 ? "识别稳定" : confidence > 0.58 ? "建议检查网格" : "建议手动校正";
@@ -1686,6 +1808,7 @@
     updateView();
     drawSourceThumb();
     renderPattern();
+    renderLivePatternPreview();
     renderPalette();
     renderStatus();
     renderHistoryButtons();
@@ -1753,6 +1876,7 @@
     state.cells[index] = next;
     recalculateCounts();
     renderPattern();
+    renderLivePatternPreview();
     renderPalette();
     renderStatus();
     renderHistoryButtons();
@@ -1765,6 +1889,7 @@
     state.future.push(action);
     recalculateCounts();
     renderPattern();
+    renderLivePatternPreview();
     renderPalette();
     renderStatus();
     renderHistoryButtons();
@@ -1777,6 +1902,7 @@
     state.history.push(action);
     recalculateCounts();
     renderPattern();
+    renderLivePatternPreview();
     renderPalette();
     renderStatus();
     renderHistoryButtons();
@@ -1965,7 +2091,7 @@
     elements.gridCols.value = String(cols);
     elements.gridRows.value = String(rows);
     drawSourceThumb();
-    elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新自动识别”会重新推测行列数。`;
+    elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新识别”会重新推测行列数。`;
     processDebounced();
   }
 
@@ -2052,12 +2178,6 @@
       if (state.cells.length) safeShowModal(elements.exportDialog);
     });
     elements.detectButton.addEventListener("click", () => autoDetect(false));
-    elements.openCalibrateButton.addEventListener("click", () => {
-      state.view = "source";
-      updateView();
-      drawSourceThumb();
-      elements.sourceCanvas.focus({ preventScroll: true });
-    });
     elements.rectModeButton.addEventListener("click", () => setFrameMode("rect"));
     elements.freeModeButton.addEventListener("click", () => setFrameMode("free"));
     elements.rotationInput.addEventListener("input", () => setRotation(elements.rotationInput.value));
@@ -2122,7 +2242,6 @@
     for (const input of [
       elements.denoise,
       elements.colorMerge,
-      elements.maxColors,
       elements.keepTransparent,
     ]) {
       input.addEventListener("input", () => {
@@ -2207,7 +2326,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=20").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=21").catch(() => {});
     }
     window.addEventListener(
       "load",
