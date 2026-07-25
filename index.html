@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=18" />
-    <link rel="stylesheet" href="./styles.css?v=18" />
+    <link rel="manifest" href="./manifest.webmanifest?v=19" />
+    <link rel="stylesheet" href="./styles.css?v=19" />
   </head>
   <body>
     <header class="topbar">
@@ -60,6 +60,17 @@
           <button class="primary-button" id="selectButton" type="button">
             <span aria-hidden="true">＋</span> 选择图片
           </button>
+          <div class="clipboard-card" id="clipboardCard">
+            <div class="clipboard-preview" aria-hidden="true">
+              <img id="clipboardPreview" alt="" hidden />
+              <span id="clipboardPlaceholder">⌘V</span>
+            </div>
+            <span class="clipboard-copy">
+              <b id="clipboardTitle">剪贴板里的图片也能用</b>
+              <small id="clipboardMeta">按 Ctrl/⌘ + V，或点击右侧检查剪贴板</small>
+            </span>
+            <button class="clipboard-button" id="clipboardButton" type="button">检查并粘贴</button>
+          </div>
           <small>支持 PNG、JPG、WebP、GIF、BMP · 建议小于 20 MB</small>
         </div>
 
@@ -101,20 +112,21 @@
                   </label>
                   <button class="text-button frame-reset" id="resetFrameButton" type="button">重置框选</button>
                 </div>
-                <div class="source-thumb">
-                  <canvas id="sourceCanvas" tabindex="0" aria-label="原图框选预览；拖动框内可移动，拖动四角可校正透视"></canvas>
-                </div>
-                <p class="frame-hint"><b>拖动框内移动，拖动四角缩放或校正透视。</b>框内网格会随行列数实时变化。</p>
-                <div class="crop-grid">
+                <button class="calibration-link" id="openCalibrateButton" type="button">
+                  <span aria-hidden="true">⌖</span>
+                  <span><b>在大图上校准网格</b><small>拖框、看格线、微调旋转都在原图上完成</small></span>
+                  <i aria-hidden="true">→</i>
+                </button>
+                <div class="crop-grid" hidden>
                   <label>左 <input id="cropLeft" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>右 <input id="cropRight" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>上 <input id="cropTop" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                   <label>下 <input id="cropBottom" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
                 </div>
                 <div class="field-row">
-                  <label>列数<input id="gridCols" type="number" min="2" max="200" value="32" inputmode="numeric" /></label>
+                  <label>列数 <small>可滚轮</small><input id="gridCols" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
                   <span>×</span>
-                  <label>行数<input id="gridRows" type="number" min="2" max="200" value="32" inputmode="numeric" /></label>
+                  <label>行数 <small>可滚轮</small><input id="gridRows" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
                 </div>
                 <button class="secondary-button full" id="detectButton" type="button">
                   <span aria-hidden="true">✦</span> 重新自动识别
@@ -165,7 +177,7 @@
             <div class="preview-toolbar">
               <div class="view-tabs" role="tablist" aria-label="预览类型">
                 <button class="active" id="resultTab" type="button" role="tab" aria-selected="true">图纸</button>
-                <button id="originalTab" type="button" role="tab" aria-selected="false">原图</button>
+                <button id="originalTab" type="button" role="tab" aria-selected="false">校准原图</button>
               </div>
               <div class="toolbar-actions">
                 <button id="undoButton" type="button" disabled aria-label="撤销">↶</button>
@@ -182,7 +194,33 @@
                 <b>正在整理每一颗豆子…</b>
               </div>
               <canvas id="patternCanvas" aria-label="生成的拼豆图纸"></canvas>
+              <div class="source-editor" id="sourceEditor" hidden>
+                <canvas
+                  id="sourceCanvas"
+                  tabindex="0"
+                  aria-label="大图网格校准；拖动框内可移动，拖动四角可调整框选"
+                ></canvas>
+                <div class="editor-tip"><b>拖角点调整范围</b><span>拖框内移动 · 网格实时更新</span></div>
+              </div>
               <canvas id="originalCanvas" aria-label="裁切后的原图" hidden></canvas>
+            </div>
+            <div class="calibration-bar" id="calibrationBar" hidden>
+              <div class="frame-mode-control">
+                <span>框选方式</span>
+                <div class="segmented-control" role="group" aria-label="框选方式">
+                  <button class="active" id="rectModeButton" type="button" aria-pressed="true">矩形</button>
+                  <button id="freeModeButton" type="button" aria-pressed="false">自由四角</button>
+                </div>
+              </div>
+              <label class="rotation-control">
+                <span><b>旋转图片</b><output id="rotationValue">0.0°</output></span>
+                <span class="rotation-track">
+                  <i aria-hidden="true"></i>
+                  <input id="rotationInput" type="range" min="-15" max="15" step="0.1" value="0" />
+                </span>
+                <small><span>向左</span><span>拖动微调水平</span><span>向右</span></small>
+              </label>
+              <button class="rotation-reset" id="rotationResetButton" type="button">归零</button>
             </div>
             <div class="statusbar">
               <span><i class="status-dot"></i><b id="gridStatus">—</b></span>
@@ -200,8 +238,8 @@
         <p class="eyebrow">快速上手</p>
         <h2>怎样得到更准确的图纸？</h2>
         <ol>
-                  <li><b>先框边缘。</b>拖动框内移动，拖动四角贴住图案或拼豆板；斜拍照片可以分别校正四个角。</li>
-                  <li><b>再看网格。</b>修改行列数时，原图上的网格会实时变化；让格线穿过每颗豆之间的缝隙。</li>
+                  <li><b>先在大图上框边缘。</b>“矩形”模式适合绝大多数图片；只有明显透视时才切到“自由四角”。</li>
+                  <li><b>再看网格和水平。</b>滚轮调整行列数，拖动图片下方的旋转滑杆，让格线穿过每颗豆之间的缝隙。</li>
                   <li><b>然后看颜色。</b>实物照片会避开中心孔和反光取色；颜色太多时提高“近似色合并”。</li>
                   <li><b>最后修正。</b>在颜色表选中颜色，直接点图纸中的单颗豆子。</li>
         </ol>
@@ -225,6 +263,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=18"></script>
+    <script src="./app.js?v=19"></script>
   </body>
 </html>

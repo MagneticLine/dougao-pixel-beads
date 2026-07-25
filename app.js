@@ -11,12 +11,27 @@
     dropZone: $("#dropZone"),
     fileInput: $("#fileInput"),
     selectButton: $("#selectButton"),
+    clipboardCard: $("#clipboardCard"),
+    clipboardPreview: $("#clipboardPreview"),
+    clipboardPlaceholder: $("#clipboardPlaceholder"),
+    clipboardTitle: $("#clipboardTitle"),
+    clipboardMeta: $("#clipboardMeta"),
+    clipboardButton: $("#clipboardButton"),
     replaceButton: $("#replaceButton"),
     fileName: $("#fileName"),
     sourceCanvas: $("#sourceCanvas"),
+    sourceEditor: $("#sourceEditor"),
     patternCanvas: $("#patternCanvas"),
     originalCanvas: $("#originalCanvas"),
     canvasStage: $("#canvasStage"),
+    previewPanel: $(".preview-panel"),
+    calibrationBar: $("#calibrationBar"),
+    openCalibrateButton: $("#openCalibrateButton"),
+    rectModeButton: $("#rectModeButton"),
+    freeModeButton: $("#freeModeButton"),
+    rotationInput: $("#rotationInput"),
+    rotationValue: $("#rotationValue"),
+    rotationResetButton: $("#rotationResetButton"),
     processing: $("#processing"),
     gridCols: $("#gridCols"),
     gridRows: $("#gridRows"),
@@ -66,16 +81,24 @@
       { x: 0, y: 1 },
     ],
     frameDrag: null,
+    frameMode: "rect",
+    rotation: 0,
     sourceView: null,
     sourcePixelCache: null,
+    clipboardFile: null,
+    clipboardUrl: "",
     detectedMode: "pixel",
     palette: [],
     cells: [],
     confidences: [],
     selectedColor: 0,
     zoom: 1,
+    sourceZoom: 1,
     view: "result",
     renderCellSize: 20,
+    renderScale: 1,
+    patternLogicalWidth: 1,
+    patternLogicalHeight: 1,
     margin: 25,
     history: [],
     future: [],
@@ -97,6 +120,21 @@
     { x: 0, y: 1 },
   ];
 
+  function viewPointToSource(point) {
+    if (!state.rotation || !state.image) return point;
+    const radians = (state.rotation * Math.PI) / 180;
+    const cosine = Math.cos(radians);
+    const sine = Math.sin(radians);
+    const width = state.image.naturalWidth;
+    const height = state.image.naturalHeight;
+    const dx = (point.x - 0.5) * width;
+    const dy = (point.y - 0.5) * height;
+    return {
+      x: (cosine * dx + sine * dy) / width + 0.5,
+      y: (-sine * dx + cosine * dy) / height + 0.5,
+    };
+  }
+
   function showToast(message) {
     elements.toast.textContent = message;
     elements.toast.classList.add("show");
@@ -112,6 +150,42 @@
   function safeCloseModal(dialog) {
     if (typeof dialog.close === "function") dialog.close();
     else dialog.removeAttribute("open");
+  }
+
+  function setClipboardCandidate(file) {
+    if (!file || !file.type.startsWith("image/")) return false;
+    if (state.clipboardUrl) URL.revokeObjectURL(state.clipboardUrl);
+    state.clipboardFile = file;
+    state.clipboardUrl = URL.createObjectURL(file);
+    elements.clipboardPreview.src = state.clipboardUrl;
+    elements.clipboardPreview.hidden = false;
+    elements.clipboardPlaceholder.hidden = true;
+    elements.clipboardTitle.textContent = "检测到剪贴板图片";
+    elements.clipboardMeta.textContent = `${file.type.replace("image/", "").toUpperCase()} · ${Math.max(1, Math.round(file.size / 1024))} KB`;
+    elements.clipboardButton.textContent = "使用这张图片";
+    elements.clipboardCard.classList.add("ready");
+    return true;
+  }
+
+  async function readClipboardImage({ quiet = false } = {}) {
+    if (!navigator.clipboard?.read) {
+      if (!quiet) showToast("当前浏览器不允许主动读取；请直接按 Ctrl/⌘ + V");
+      return false;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.find((candidate) => candidate.startsWith("image/"));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        const extension = type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+        return setClipboardCandidate(new File([blob], `剪贴板图片.${extension}`, { type }));
+      }
+      if (!quiet) showToast("剪贴板里暂时没有图片");
+    } catch {
+      if (!quiet) showToast("无法读取剪贴板；请按 Ctrl/⌘ + V 粘贴");
+    }
+    return false;
   }
 
   function getSettings() {
@@ -455,6 +529,10 @@
       state.crop = { left: 0, right: 0, top: 0, bottom: 0 };
       state.frame = defaultFrame();
       state.frameDrag = null;
+      state.frameMode = "rect";
+      state.rotation = 0;
+      state.sourceZoom = 1;
+      state.view = "source";
       state.sourcePixelCache = null;
       state.detectedMode = detectImageKind();
       suggestPhotoFrame();
@@ -464,6 +542,10 @@
       syncCropFromFrame();
       elements.hero.hidden = true;
       elements.workspace.hidden = false;
+      elements.rotationInput.value = "0";
+      elements.rotationValue.value = "0.0°";
+      updateFrameMode();
+      updateView();
       drawSourceThumb();
       window.scrollTo({ top: 0, behavior: "smooth" });
       await autoDetect(true);
@@ -544,23 +626,56 @@
     };
   }
 
+  function fitSourceFrame() {
+    if (!state.image || elements.sourceEditor.hidden) return;
+    const box = elements.sourceEditor.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) return;
+    const baseScale = Math.min(
+      box.width / state.image.naturalWidth,
+      box.height / state.image.naturalHeight,
+    );
+    const xs = state.frame.map((point) => point.x);
+    const ys = state.frame.map((point) => point.y);
+    const frameWidth = (Math.max(...xs) - Math.min(...xs)) * state.image.naturalWidth * baseScale;
+    const frameHeight = (Math.max(...ys) - Math.min(...ys)) * state.image.naturalHeight * baseScale;
+    state.sourceZoom = clamp(
+      Math.min((box.width * 0.72) / Math.max(1, frameWidth), (box.height * 0.72) / Math.max(1, frameHeight)),
+      0.75,
+      5,
+    );
+    drawSourceThumb();
+  }
+
   function drawSourceThumb() {
     if (!state.image) return;
     const canvas = elements.sourceCanvas;
-    const box = canvas.parentElement.getBoundingClientRect();
+    const box = elements.sourceEditor.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(260, Math.round(box.width * dpr));
     canvas.height = Math.max(180, Math.round(box.height * dpr));
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const scale = Math.min(canvas.width / state.image.naturalWidth, canvas.height / state.image.naturalHeight);
-    const width = state.image.naturalWidth * scale;
-    const height = state.image.naturalHeight * scale;
-    const x = (canvas.width - width) / 2;
-    const y = (canvas.height - height) / 2;
+    const baseScale = Math.min(
+      canvas.width / state.image.naturalWidth,
+      canvas.height / state.image.naturalHeight,
+    );
+    const width = state.image.naturalWidth * baseScale * state.sourceZoom;
+    const height = state.image.naturalHeight * baseScale * state.sourceZoom;
+    const frameCenterX = state.frame.reduce((sum, point) => sum + point.x, 0) / state.frame.length;
+    const frameCenterY = state.frame.reduce((sum, point) => sum + point.y, 0) / state.frame.length;
+    const x = canvas.width / 2 - frameCenterX * width;
+    const y = canvas.height / 2 - frameCenterY * height;
     state.sourceView = { x, y, width, height, dpr };
-    ctx.drawImage(state.image, x, y, width, height);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, width, height);
+    ctx.clip();
+    ctx.translate(x + width / 2, y + height / 2);
+    ctx.rotate((state.rotation * Math.PI) / 180);
+    ctx.drawImage(state.image, -width / 2, -height / 2, width, height);
+    ctx.restore();
 
     const frame = state.frame.map(canvasFramePoint);
     const projector = createFrameProjector();
@@ -606,21 +721,33 @@
     ctx.stroke();
     frame.forEach((point, index) => {
       ctx.fillStyle = "#ffffff";
-      ctx.strokeStyle = index === 0 ? "#e7b63e" : "#39795f";
+      ctx.strokeStyle =
+        state.frameMode === "free" ? (index === 0 ? "#e7b63e" : "#39795f") : "#427ca4";
       ctx.lineWidth = 2 * dpr;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 6.5 * dpr, 0, Math.PI * 2);
+      if (state.frameMode === "rect") {
+        const size = 11 * dpr;
+        ctx.rect(point.x - size / 2, point.y - size / 2, size, size);
+      } else {
+        ctx.arc(point.x, point.y, 6.5 * dpr, 0, Math.PI * 2);
+      }
       ctx.fill();
       ctx.stroke();
     });
     ctx.restore();
     canvas.setAttribute(
       "aria-label",
-      `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}框选预览，当前 ${state.cols} 列 × ${state.rows} 行`,
+      `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度，${state.frameMode === "rect" ? "矩形" : "自由四角"}模式`,
     );
+    if (state.view !== "result") {
+      elements.zoomValue.value = `${Math.round(state.sourceZoom * 100)}%`;
+    }
   }
 
   function readSourcePixel(source, normalizedX, normalizedY) {
+    if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
+      return [0, 0, 0, 0];
+    }
     const x = clamp(normalizedX * (source.width - 1), 0, source.width - 1);
     const y = clamp(normalizedY * (source.height - 1), 0, source.height - 1);
     const x0 = Math.floor(x);
@@ -660,7 +787,9 @@
     const projector = createFrameProjector();
     for (let y = 0; y < canvas.height; y += 1) {
       for (let x = 0; x < canvas.width; x += 1) {
-        const point = projector((x + 0.5) / canvas.width, (y + 0.5) / canvas.height);
+        const point = viewPointToSource(
+          projector((x + 0.5) / canvas.width, (y + 0.5) / canvas.height),
+        );
         const color = readSourcePixel(source, point.x, point.y);
         const index = (y * canvas.width + x) * 4;
         const alpha = color[3] / 255;
@@ -766,9 +895,25 @@
     const point = pointerImagePoint(event);
     const drag = state.frameDrag;
     if (drag.type === "corner") {
-      const next = drag.initial.map((framePoint) => ({ ...framePoint }));
-      next[drag.corner] = { x: point.x, y: point.y };
-      if (frameIsConvex(next)) state.frame = next;
+      if (state.frameMode === "rect") {
+        const opposite = drag.initial[(drag.corner + 2) % 4];
+        const left = Math.min(point.x, opposite.x);
+        const right = Math.max(point.x, opposite.x);
+        const top = Math.min(point.y, opposite.y);
+        const bottom = Math.max(point.y, opposite.y);
+        if (right - left >= 0.03 && bottom - top >= 0.03) {
+          state.frame = [
+            { x: left, y: top },
+            { x: right, y: top },
+            { x: right, y: bottom },
+            { x: left, y: bottom },
+          ];
+        }
+      } else {
+        const next = drag.initial.map((framePoint) => ({ ...framePoint }));
+        next[drag.corner] = { x: point.x, y: point.y };
+        if (frameIsConvex(next)) state.frame = next;
+      }
     } else if (drag.type === "move") {
       const deltaX = point.x - drag.start.x;
       const deltaY = point.y - drag.start.y;
@@ -1034,7 +1179,10 @@
           ? `已识别为 ${state.cols} × ${state.rows}。修改行列数会立即更新；此按钮只负责重新推测。`
           : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
-      if (isInitial) chooseInitialZoom();
+      if (isInitial) {
+        fitSourceFrame();
+        chooseInitialZoom();
+      }
       if (isInitial && state.detectionConfidence < 0.5) {
         showToast("已生成初稿；建议检查行列数是否正确");
       }
@@ -1098,14 +1246,16 @@
               const angle = (Math.PI * 2 * angleIndex) / 16;
               const u = (col + 0.5 + Math.cos(angle) * radius) / cols;
               const v = (row + 0.5 + Math.sin(angle) * radius) / rows;
-              const point = projector(u, v);
+              const point = viewPointToSource(projector(u, v));
               colors.push(readSourcePixel(source, point.x, point.y));
             }
           }
         } else {
           for (const offsetY of [-0.2, -0.1, 0, 0.1, 0.2]) {
             for (const offsetX of [-0.2, -0.1, 0, 0.1, 0.2]) {
-              const point = projector((col + 0.5 + offsetX) / cols, (row + 0.5 + offsetY) / rows);
+              const point = viewPointToSource(
+                projector((col + 0.5 + offsetX) / cols, (row + 0.5 + offsetY) / rows),
+              );
               colors.push(readSourcePixel(source, point.x, point.y));
             }
           }
@@ -1386,15 +1536,23 @@
     const rows = state.rows;
     const cell = clamp(Math.floor(1500 / Math.max(cols, rows)), 7, 24);
     const margin = cell >= 12 ? 26 : 18;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const logicalWidth = cols * cell + margin * 2;
+    const logicalHeight = rows * cell + margin * 2;
     state.renderCellSize = cell;
+    state.renderScale = scale;
     state.margin = margin;
-    canvas.width = cols * cell + margin * 2;
-    canvas.height = rows * cell + margin * 2;
-    canvas.style.width = `${Math.round(canvas.width * state.zoom)}px`;
-    canvas.style.height = `${Math.round(canvas.height * state.zoom)}px`;
+    state.patternLogicalWidth = logicalWidth;
+    state.patternLogicalHeight = logicalHeight;
+    canvas.width = Math.round(logicalWidth * scale);
+    canvas.height = Math.round(logicalHeight * scale);
+    canvas.style.width = `${Math.round(logicalWidth * state.zoom)}px`;
+    canvas.style.height = `${Math.round(logicalHeight * state.zoom)}px`;
     const ctx = canvas.getContext("2d");
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     ctx.fillStyle = "#fffefb";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
@@ -1412,10 +1570,10 @@
         ctx.fillRect(x, y, cell, cell);
         if (cell >= 17) {
           ctx.fillStyle = textColor(color);
-          ctx.font = `700 ${Math.max(7, Math.floor(cell * 0.36))}px system-ui`;
+          ctx.font = `700 ${Math.max(8, Math.floor(cell * 0.36))}px Arial, "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.code, x + cell / 2, y + cell / 2 + 0.5);
+          ctx.fillText(color.code, Math.round(x + cell / 2), Math.round(y + cell / 2));
         } else if (cell >= 10) {
           ctx.fillStyle = textColor(color);
           ctx.globalAlpha = 0.52;
@@ -1447,7 +1605,7 @@
 
     if (cell >= 10) {
       ctx.fillStyle = "#6f746c";
-      ctx.font = `600 ${Math.max(7, Math.min(10, cell * 0.45))}px system-ui`;
+      ctx.font = `600 ${Math.max(8, Math.min(10, Math.floor(cell * 0.45)))}px Arial, "Microsoft YaHei", sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       for (let col = 4; col < cols; col += 5) {
@@ -1516,48 +1674,62 @@
   }
 
   function renderAll() {
+    updateView();
     drawSourceThumb();
     renderPattern();
-    renderOriginal();
     renderPalette();
     renderStatus();
     renderHistoryButtons();
-    updateView();
+  }
+
+  function updateFrameMode() {
+    const rectangular = state.frameMode === "rect";
+    elements.rectModeButton.classList.toggle("active", rectangular);
+    elements.freeModeButton.classList.toggle("active", !rectangular);
+    elements.rectModeButton.setAttribute("aria-pressed", String(rectangular));
+    elements.freeModeButton.setAttribute("aria-pressed", String(!rectangular));
+    elements.sourceEditor.dataset.frameMode = state.frameMode;
   }
 
   function updateView() {
     const result = state.view === "result";
     elements.patternCanvas.hidden = !result;
-    elements.originalCanvas.hidden = result;
+    elements.sourceEditor.hidden = result;
+    elements.originalCanvas.hidden = true;
+    elements.calibrationBar.hidden = result;
+    elements.previewPanel?.classList?.toggle("source-active", !result);
     elements.resultTab.classList.toggle("active", result);
     elements.originalTab.classList.toggle("active", !result);
     elements.resultTab.setAttribute("aria-selected", String(result));
     elements.originalTab.setAttribute("aria-selected", String(!result));
+    elements.zoomValue.value = `${Math.round((result ? state.zoom : state.sourceZoom) * 100)}%`;
+    if (!result) requestAnimationFrame(drawSourceThumb);
   }
 
   function updateZoom(next) {
     state.zoom = clamp(next, 0.35, 3);
-    elements.zoomValue.value = `${Math.round(state.zoom * 100)}%`;
-    if (state.view === "result") {
-      elements.patternCanvas.style.width = `${Math.round(elements.patternCanvas.width * state.zoom)}px`;
-      elements.patternCanvas.style.height = `${Math.round(elements.patternCanvas.height * state.zoom)}px`;
-    } else {
-      elements.originalCanvas.style.width = `${Math.round(elements.originalCanvas.width * state.zoom)}px`;
-      elements.originalCanvas.style.height = `${Math.round(elements.originalCanvas.height * state.zoom)}px`;
-    }
+    elements.patternCanvas.style.width = `${Math.round(state.patternLogicalWidth * state.zoom)}px`;
+    elements.patternCanvas.style.height = `${Math.round(state.patternLogicalHeight * state.zoom)}px`;
+    if (state.view === "result") elements.zoomValue.value = `${Math.round(state.zoom * 100)}%`;
+  }
+
+  function updateSourceZoom(next) {
+    state.sourceZoom = clamp(next, 0.5, 6);
+    elements.zoomValue.value = `${Math.round(state.sourceZoom * 100)}%`;
+    drawSourceThumb();
   }
 
   function chooseInitialZoom() {
     const available = Math.max(280, elements.canvasStage.clientWidth - 68);
-    const scale = available / Math.max(1, elements.patternCanvas.width);
+    const scale = available / Math.max(1, state.patternLogicalWidth);
     updateZoom(clamp(scale, 0.5, 1));
   }
 
   function editCell(event) {
     if (state.view !== "result" || !state.palette.length) return;
     const rect = elements.patternCanvas.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * elements.patternCanvas.width;
-    const y = ((event.clientY - rect.top) / rect.height) * elements.patternCanvas.height;
+    const x = ((event.clientX - rect.left) / rect.width) * state.patternLogicalWidth;
+    const y = ((event.clientY - rect.top) / rect.height) * state.patternLogicalHeight;
     const col = Math.floor((x - state.margin) / state.renderCellSize);
     const row = Math.floor((y - state.margin) / state.renderCellSize);
     if (col < 0 || row < 0 || col >= state.cols || row >= state.rows) return;
@@ -1775,10 +1947,59 @@
     processImage({ resetHistory: true });
   }, 320);
 
+  function updateGridFromInputs() {
+    const cols = clamp(Math.round(Number(elements.gridCols.value) || state.cols), 2, 200);
+    const rows = clamp(Math.round(Number(elements.gridRows.value) || state.rows), 2, 200);
+    state.cols = cols;
+    state.rows = rows;
+    elements.gridCols.value = String(cols);
+    elements.gridRows.value = String(rows);
+    drawSourceThumb();
+    elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新自动识别”会重新推测行列数。`;
+    processDebounced();
+  }
+
+  function setFrameMode(mode) {
+    state.frameMode = mode === "free" ? "free" : "rect";
+    if (state.frameMode === "rect") {
+      const xs = state.frame.map((point) => point.x);
+      const ys = state.frame.map((point) => point.y);
+      const left = Math.min(...xs);
+      const right = Math.max(...xs);
+      const top = Math.min(...ys);
+      const bottom = Math.max(...ys);
+      state.frame = [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
+      syncCropFromFrame();
+      processDebounced();
+    }
+    updateFrameMode();
+    drawSourceThumb();
+  }
+
+  function setRotation(value) {
+    state.rotation = clamp(Number(value) || 0, -15, 15);
+    elements.rotationInput.value = state.rotation.toFixed(1);
+    elements.rotationValue.value = `${state.rotation.toFixed(1)}°`;
+    drawSourceThumb();
+    processDebounced();
+  }
+
   function bindEvents() {
     elements.selectButton.addEventListener("click", () => elements.fileInput.click());
     elements.replaceButton.addEventListener("click", () => elements.fileInput.click());
     elements.fileInput.addEventListener("change", () => loadFile(elements.fileInput.files[0]));
+    elements.clipboardButton.addEventListener("click", async () => {
+      if (state.clipboardFile) {
+        loadFile(state.clipboardFile);
+        return;
+      }
+      await readClipboardImage();
+    });
 
     for (const type of ["dragenter", "dragover"]) {
       elements.dropZone.addEventListener(type, (event) => {
@@ -1794,8 +2015,19 @@
     }
     elements.dropZone.addEventListener("drop", (event) => loadFile(event.dataTransfer.files[0]));
     document.addEventListener("paste", (event) => {
-      const file = [...(event.clipboardData?.files || [])].find((item) => item.type.startsWith("image/"));
-      if (file) loadFile(file);
+      const file =
+        [...(event.clipboardData?.files || [])].find((item) => item.type.startsWith("image/")) ||
+        [...(event.clipboardData?.items || [])]
+          .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+          ?.getAsFile();
+      if (!file) return;
+      event.preventDefault();
+      if (!elements.workspace.hidden) {
+        loadFile(file);
+        return;
+      }
+      setClipboardCandidate(file);
+      showToast("已检测到剪贴板图片，确认缩略图后点击使用");
     });
 
     elements.helpButton.addEventListener("click", () => safeShowModal(elements.helpDialog));
@@ -1814,6 +2046,16 @@
       if (state.cells.length) safeShowModal(elements.exportDialog);
     });
     elements.detectButton.addEventListener("click", () => autoDetect(false));
+    elements.openCalibrateButton.addEventListener("click", () => {
+      state.view = "source";
+      updateView();
+      drawSourceThumb();
+      elements.sourceCanvas.focus({ preventScroll: true });
+    });
+    elements.rectModeButton.addEventListener("click", () => setFrameMode("rect"));
+    elements.freeModeButton.addEventListener("click", () => setFrameMode("free"));
+    elements.rotationInput.addEventListener("input", () => setRotation(elements.rotationInput.value));
+    elements.rotationResetButton.addEventListener("click", () => setRotation(0));
     elements.resetFrameButton.addEventListener("click", () => {
       if (!state.image) return;
       state.frame = defaultFrame();
@@ -1859,15 +2101,18 @@
       input.addEventListener("input", cropDebounced);
     }
     for (const input of [elements.gridCols, elements.gridRows]) {
-      input.addEventListener("input", () => {
-        const cols = clamp(Math.round(Number(elements.gridCols.value) || state.cols), 2, 200);
-        const rows = clamp(Math.round(Number(elements.gridRows.value) || state.rows), 2, 200);
-        state.cols = cols;
-        state.rows = rows;
-        drawSourceThumb();
-        elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新自动识别”会重新推测行列数。`;
-        processDebounced();
-      });
+      input.addEventListener("input", updateGridFromInputs);
+      input.addEventListener(
+        "wheel",
+        (event) => {
+          if (!event.deltaY) return;
+          event.preventDefault();
+          const amount = event.shiftKey ? 5 : 1;
+          input.value = String(clamp((Number(input.value) || 2) + (event.deltaY < 0 ? amount : -amount), 2, 200));
+          updateGridFromInputs();
+        },
+        { passive: false },
+      );
     }
     for (const input of [
       elements.denoise,
@@ -1896,8 +2141,14 @@
     elements.patternCanvas.addEventListener("click", editCell);
     elements.undoButton.addEventListener("click", undo);
     elements.redoButton.addEventListener("click", redo);
-    elements.zoomOut.addEventListener("click", () => updateZoom(state.zoom - 0.15));
-    elements.zoomIn.addEventListener("click", () => updateZoom(state.zoom + 0.15));
+    elements.zoomOut.addEventListener("click", () => {
+      if (state.view === "result") updateZoom(state.zoom - 0.15);
+      else updateSourceZoom(state.sourceZoom - 0.25);
+    });
+    elements.zoomIn.addEventListener("click", () => {
+      if (state.view === "result") updateZoom(state.zoom + 0.15);
+      else updateSourceZoom(state.sourceZoom + 0.25);
+    });
 
     elements.resultTab.addEventListener("click", () => {
       state.view = "result";
@@ -1905,9 +2156,9 @@
       updateZoom(state.zoom);
     });
     elements.originalTab.addEventListener("click", () => {
-      state.view = "original";
+      state.view = "source";
       updateView();
-      updateZoom(state.zoom);
+      drawSourceThumb();
     });
 
     elements.exportDialog.addEventListener("click", (event) => {
@@ -1930,6 +2181,15 @@
         drawSourceThumb();
       }, 120),
     );
+    window.addEventListener("focus", async () => {
+      if (elements.hero.hidden || state.clipboardFile || !navigator.permissions?.query) return;
+      try {
+        const permission = await navigator.permissions.query({ name: "clipboard-read" });
+        if (permission.state === "granted") await readClipboardImage({ quiet: true });
+      } catch {
+        // Clipboard permission querying is optional; Ctrl/⌘ + V still works.
+      }
+    });
     window.addEventListener("keydown", (event) => {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier || elements.workspace.hidden) return;
@@ -1946,8 +2206,9 @@
   function init() {
     restoreSettings();
     bindEvents();
+    updateFrameMode();
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=8").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=19").catch(() => {});
     }
     window.addEventListener(
       "load",
