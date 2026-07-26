@@ -3511,7 +3511,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=50").catch(() => {});
+      navigator.serviceWorker.register("./sw-v51.js").catch(() => {});
     }
     window.addEventListener(
       "load",
