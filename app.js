@@ -88,6 +88,7 @@
     zoomOut: $("#zoomOut"),
     zoomIn: $("#zoomIn"),
     zoomValue: $("#zoomValue"),
+    zoomControls: $(".zoom-controls"),
     gridStatus: $("#gridStatus"),
     colorStatus: $("#colorStatus"),
     confidenceStatus: $("#confidenceStatus"),
@@ -866,6 +867,44 @@
     }
   }
 
+  function fitSourceFrameToViewport(coverage = 0.8) {
+    if (!state.image) return false;
+    const canvas = elements.sourceCanvas;
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
+    if (canvasWidth < 2 || canvasHeight < 2) return false;
+
+    const imageAspect = state.image.naturalWidth / Math.max(1, state.image.naturalHeight);
+    let fittedWidth = canvasWidth;
+    let fittedHeight = fittedWidth / imageAspect;
+    if (fittedHeight > canvasHeight) {
+      fittedHeight = canvasHeight;
+      fittedWidth = fittedHeight * imageAspect;
+    }
+
+    const xs = state.frame.map((point) => point.x);
+    const ys = state.frame.map((point) => point.y);
+    const left = Math.min(...xs);
+    const right = Math.max(...xs);
+    const top = Math.min(...ys);
+    const bottom = Math.max(...ys);
+    const frameWidth = Math.max(0.01, right - left);
+    const frameHeight = Math.max(0.01, bottom - top);
+    const targetCoverage = clamp(coverage, 0.25, 0.95);
+    const zoom = Math.min(
+      (canvasWidth * targetCoverage) / Math.max(1, fittedWidth * frameWidth),
+      (canvasHeight * targetCoverage) / Math.max(1, fittedHeight * frameHeight),
+    );
+
+    state.sourceZoom = clamp(zoom, 0.5, 6);
+    state.sourcePan = {
+      x: 0.5 - (left + right) / 2,
+      y: 0.5 - (top + bottom) / 2,
+    };
+    drawSourceThumb();
+    return true;
+  }
+
   function readSourcePixel(source, normalizedX, normalizedY) {
     if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1) {
       return [0, 0, 0, 0];
@@ -1525,6 +1564,7 @@
         await sleepFrame();
         if (token !== state.processingToken) return;
       }
+      fitSourceFrameToViewport(0.8);
 
       state.detectionConfidence =
         (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
@@ -2051,11 +2091,14 @@
     const canvas = elements.patternCanvas;
     const cols = state.cols;
     const rows = state.rows;
-    const cell = clamp(Math.floor(1500 / Math.max(cols, rows)), 7, 24);
-    const margin = cell >= 12 ? 26 : 18;
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const cell = clamp(Math.floor(3600 / Math.max(cols, rows)), 18, 32);
+    const margin = 32;
     const logicalWidth = cols * cell + margin * 2;
     const logicalHeight = rows * cell + margin * 2;
+    const requestedScale = Math.min(window.devicePixelRatio || 1, 2);
+    const dimensionScale = 4096 / Math.max(logicalWidth, logicalHeight);
+    const areaScale = Math.sqrt(16_000_000 / Math.max(1, logicalWidth * logicalHeight));
+    const scale = Math.max(1, Math.min(requestedScale, dimensionScale, areaScale));
     state.renderCellSize = cell;
     state.renderScale = scale;
     state.margin = margin;
@@ -2337,6 +2380,23 @@
     preview.style.top = `${state.previewPosition.y}px`;
   }
 
+  function initializeLivePreviewPosition() {
+    if (
+      state.previewPosition ||
+      elements.livePatternPreview.hidden ||
+      mobileLayoutQuery.matches
+    ) {
+      return;
+    }
+    const previewRect = elements.canvasStage.getBoundingClientRect();
+    const preview = elements.livePatternPreview;
+    const x = Math.min(
+      window.innerWidth - preview.offsetWidth - 18,
+      previewRect.right - preview.offsetWidth - 18,
+    );
+    setLivePreviewPosition(x, previewRect.top + 14);
+  }
+
   function clampLivePreviewPosition() {
     if (!state.previewPosition || elements.livePatternPreview.hidden) return;
     setLivePreviewPosition(state.previewPosition.x, state.previewPosition.y);
@@ -2451,13 +2511,14 @@
     else {
       requestAnimationFrame(() => {
         drawSourceThumb();
-        clampLivePreviewPosition();
+        if (state.previewPosition) clampLivePreviewPosition();
+        else initializeLivePreviewPosition();
       });
     }
   }
 
   function updateZoom(next) {
-    state.zoom = clamp(next, 0.35, 3);
+    state.zoom = clamp(next, 0.08, 3);
     elements.patternCanvas.style.width = `${Math.round(state.patternLogicalWidth * state.zoom)}px`;
     elements.patternCanvas.style.height = `${Math.round(state.patternLogicalHeight * state.zoom)}px`;
     if (state.view === "result") elements.zoomValue.value = `${Math.round(state.zoom * 100)}%`;
@@ -2472,7 +2533,7 @@
   function chooseInitialZoom() {
     const available = Math.max(280, elements.canvasStage.clientWidth - 68);
     const scale = available / Math.max(1, state.patternLogicalWidth);
-    updateZoom(clamp(scale, 0.5, 1));
+    updateZoom(clamp(scale, 0.08, 1));
   }
 
   function editCell(event) {
@@ -3296,17 +3357,69 @@
     showToast(`${label}已下载`);
   }
 
+  function calculateExportLayout(cols, rows, colorCount) {
+    const largestAxis = Math.max(cols, rows, 1);
+    const cell = clamp(Math.floor(4000 / largestAxis), 20, 40);
+    const margin = 48;
+    const gridWidth = cols * cell;
+    const gridHeight = rows * cell;
+    const legendScale = clamp(Math.max(gridWidth, gridHeight) / 1800, 1, 2);
+    const legendColumnWidth = Math.round(270 * legendScale);
+    const legendTop = Math.round(100 * legendScale);
+    const legendRowHeight = Math.round(29 * legendScale);
+    const legendPanelTargetHeight = Math.max(
+      gridHeight + margin * 2,
+      Math.round(1600 * legendScale),
+    );
+    const legendRowsPerColumn = Math.max(
+      1,
+      Math.floor(
+        (legendPanelTargetHeight - legendTop - margin) / legendRowHeight,
+      ),
+    );
+    const legendColumnCount = Math.max(
+      1,
+      Math.ceil(colorCount / legendRowsPerColumn),
+    );
+    const legendRowsUsed = Math.min(colorCount, legendRowsPerColumn);
+    const legendWidth = legendColumnWidth * legendColumnCount;
+    const legendHeight =
+      legendTop + legendRowsUsed * legendRowHeight + margin;
+    return {
+      cell,
+      margin,
+      gridWidth,
+      gridHeight,
+      legendScale,
+      legendColumnWidth,
+      legendTop,
+      legendRowHeight,
+      legendRowsPerColumn,
+      legendWidth,
+      canvasWidth: gridWidth + margin * 2 + legendWidth,
+      canvasHeight: Math.max(gridHeight + margin * 2, legendHeight),
+    };
+  }
+
   function makeExportCanvas() {
-    const cell = clamp(Math.floor(3000 / Math.max(state.cols, 1)), 12, 34);
-    const margin = 46;
-    const legendWidth = 270;
-    const gridWidth = state.cols * cell;
-    const gridHeight = state.rows * cell;
     const used = state.palette.filter((color) => color.count > 0);
-    const legendHeight = 100 + used.length * 29;
+    const layout = calculateExportLayout(state.cols, state.rows, used.length);
+    const {
+      cell,
+      margin,
+      gridWidth,
+      gridHeight,
+      legendScale,
+      legendColumnWidth,
+      legendTop,
+      legendRowHeight,
+      legendRowsPerColumn,
+      canvasWidth,
+      canvasHeight,
+    } = layout;
     const canvas = document.createElement("canvas");
-    canvas.width = Math.min(4096, gridWidth + margin * 2 + legendWidth);
-    canvas.height = Math.min(8192, Math.max(gridHeight + margin * 2, legendHeight));
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = "#fffdf8";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -3322,13 +3435,13 @@
           ctx.fillStyle = colorCss(state.palette[paletteIndex]);
         }
         ctx.fillRect(x, y, cell, cell);
-        if (paletteIndex >= 0 && cell >= 18) {
+        if (paletteIndex >= 0) {
           const color = state.palette[paletteIndex];
           ctx.fillStyle = textColor(color);
-          ctx.font = `700 ${Math.max(8, Math.floor(cell * 0.34))}px system-ui`;
+          ctx.font = `700 ${Math.max(9, Math.floor(cell * 0.42))}px system-ui`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.name, x + cell / 2, y + cell / 2);
+          ctx.fillText(color.name, x + cell / 2, y + cell / 2, cell - 3);
         }
       }
     }
@@ -3356,26 +3469,45 @@
     ctx.fillStyle = "#20231f";
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.font = "800 21px system-ui";
-    ctx.fillText("豆稿 · 拼豆图纸", legendX, 48);
+    ctx.font = `800 ${Math.round(21 * legendScale)}px system-ui`;
+    ctx.fillText("豆稿 · 拼豆图纸", legendX, Math.round(48 * legendScale));
     ctx.fillStyle = "#70746c";
-    ctx.font = "12px system-ui";
-    ctx.fillText(`${state.cols} × ${state.rows} · ${state.cells.filter((cellIndex) => cellIndex >= 0).length} 颗`, legendX, 72);
+    ctx.font = `${Math.round(12 * legendScale)}px system-ui`;
+    ctx.fillText(
+      `${state.cols} × ${state.rows} · ${state.cells.filter((cellIndex) => cellIndex >= 0).length} 颗`,
+      legendX,
+      Math.round(72 * legendScale),
+    );
 
     used.forEach((color, index) => {
-      const y = 103 + index * 29;
+      const legendColumn = Math.floor(index / legendRowsPerColumn);
+      const legendRow = index % legendRowsPerColumn;
+      const x = legendX + legendColumn * legendColumnWidth;
+      const y = legendTop + (legendRow + 0.1) * legendRowHeight;
+      const swatchSize = Math.round(20 * legendScale);
+      const swatchTop = y - Math.round(16 * legendScale);
       ctx.fillStyle = colorCss(color);
-      ctx.fillRect(legendX, y - 16, 20, 20);
+      ctx.fillRect(x, swatchTop, swatchSize, swatchSize);
       ctx.strokeStyle = "rgba(0,0,0,.16)";
-      ctx.strokeRect(legendX + 0.5, y - 15.5, 19, 19);
+      ctx.strokeRect(
+        x + 0.5,
+        swatchTop + 0.5,
+        swatchSize - 1,
+        swatchSize - 1,
+      );
       ctx.fillStyle = "#20231f";
-      ctx.font = "700 12px system-ui";
-      ctx.fillText(color.name, legendX + 29, y);
+      ctx.font = `700 ${Math.round(12 * legendScale)}px system-ui`;
+      ctx.fillText(color.name, x + Math.round(29 * legendScale), y);
       ctx.fillStyle = "#70746c";
-      ctx.font = "11px system-ui";
+      ctx.font = `${Math.round(11 * legendScale)}px system-ui`;
       const hex = rgbToHex(color);
       const reference = color.code === hex ? hex : `${color.code} · ${hex}`;
-      ctx.fillText(`${reference} · ${color.count} 颗`, legendX + 61, y);
+      ctx.fillText(
+        `${reference} · ${color.count} 颗`,
+        x + Math.round(61 * legendScale),
+        y,
+        legendColumnWidth - Math.round(67 * legendScale),
+      );
     });
     return canvas;
   }
@@ -3947,13 +4079,24 @@
     elements.undoButton.addEventListener("click", undo);
     elements.redoButton.addEventListener("click", redo);
     elements.zoomOut.addEventListener("click", () => {
-      if (state.view === "result") updateZoom(state.zoom - 0.15);
+      if (state.view === "result") updateZoom(state.zoom - 0.25);
       else updateSourceZoom(state.sourceZoom - 0.25);
     });
     elements.zoomIn.addEventListener("click", () => {
-      if (state.view === "result") updateZoom(state.zoom + 0.15);
+      if (state.view === "result") updateZoom(state.zoom + 0.25);
       else updateSourceZoom(state.sourceZoom + 0.25);
     });
+    elements.zoomControls.addEventListener(
+      "wheel",
+      (event) => {
+        if (!event.deltaY) return;
+        event.preventDefault();
+        const delta = event.deltaY < 0 ? 0.01 : -0.01;
+        if (state.view === "result") updateZoom(state.zoom + delta);
+        else updateSourceZoom(state.sourceZoom + delta);
+      },
+      { passive: false },
+    );
 
     elements.resultTab.addEventListener("click", () => {
       cancelColorPick({ redraw: false });
@@ -4015,7 +4158,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v54.js").catch(() => {});
+      navigator.serviceWorker.register("./sw-v56.js").catch(() => {});
     }
     window.addEventListener(
       "load",
@@ -4036,6 +4179,7 @@
     cleanCells,
     makeCode,
     rgbToHex,
+    calculateExportLayout,
   });
 
   if (typeof module !== "undefined" && module.exports) module.exports = coreApi;

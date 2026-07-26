@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v54.webmanifest" />
-    <link rel="stylesheet" href="./styles-v54.css" />
+    <link rel="manifest" href="./manifest-v56.webmanifest" />
+    <link rel="stylesheet" href="./styles-v56.css" />
   </head>
   <body>
     <header class="topbar">
@@ -80,7 +80,7 @@
           <div><span>03</span><b>合并近色</b><small>控制实际采购色数</small></div>
           <div><span>04</span><b>导出图纸</b><small>编号、数量一目了然</small></div>
         </div>
-        <footer class="site-version" aria-label="当前版本">豆稿 <b>v54</b></footer>
+        <footer class="site-version" aria-label="当前版本">豆稿 <b>v56</b></footer>
       </section>
 
       <section class="workspace" id="workspace" hidden>
@@ -228,9 +228,11 @@
                 <button id="undoButton" type="button" disabled aria-label="撤销">↶</button>
                 <button id="redoButton" type="button" disabled aria-label="重做">↷</button>
                 <span class="divider"></span>
-                <button id="zoomOut" type="button" aria-label="缩小">−</button>
-                <output id="zoomValue">100%</output>
-                <button id="zoomIn" type="button" aria-label="放大">＋</button>
+                <span class="zoom-controls" title="按钮每次调整 25% · 鼠标滚轮每次微调 1%">
+                  <button id="zoomOut" type="button" aria-label="缩小">−</button>
+                  <output id="zoomValue">100%</output>
+                  <button id="zoomIn" type="button" aria-label="放大">＋</button>
+                </span>
               </div>
             </div>
             <div class="canvas-stage" id="canvasStage">
@@ -389,6 +391,6 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v54.js"></script>
+    <script src="./app-v56.js"></script>
   </body>
 </html>

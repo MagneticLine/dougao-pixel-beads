@@ -1387,6 +1387,16 @@ body.editing main {
   align-items: center;
 }
 
+.zoom-controls {
+  display: flex;
+  border-radius: 8px;
+  align-items: center;
+}
+
+.zoom-controls:hover {
+  background: rgba(232, 228, 220, 0.42);
+}
+
 .toolbar-actions button {
   display: grid;
   width: 31px;
@@ -1580,7 +1590,7 @@ body.editing main {
 .live-pattern-preview {
   position: fixed;
   z-index: 45;
-  top: calc(env(safe-area-inset-top, 0px) + 78px);
+  top: calc(env(safe-area-inset-top, 0px) + 178px);
   right: 18px;
   display: grid;
   width: clamp(160px, 19vw, 220px);
