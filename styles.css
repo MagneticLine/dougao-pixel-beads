@@ -165,12 +165,28 @@ body.editing main {
 }
 
 .hero {
+  position: relative;
   display: grid;
   min-height: calc(100vh - 76px);
   padding: clamp(48px, 8vh, 96px) clamp(24px, 5vw, 84px) 36px;
   grid-template-columns: minmax(340px, 0.9fr) minmax(430px, 1.1fr);
   gap: clamp(44px, 8vw, 130px);
   align-items: center;
+}
+
+.site-version {
+  position: absolute;
+  right: clamp(24px, 5vw, 84px);
+  bottom: 13px;
+  color: #aaa398;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.site-version b {
+  color: #777168;
+  font-weight: 850;
 }
 
 .hero-copy {
@@ -706,6 +722,12 @@ body.editing main {
   color: var(--ink);
   background: white;
   font-weight: 750;
+}
+
+.field-row input.draft-invalid {
+  border-color: #d68a7d;
+  background: #fff8f5;
+  box-shadow: 0 0 0 2px rgba(201, 68, 48, 0.1);
 }
 
 .crop-grid label span {
@@ -2895,6 +2917,93 @@ body.editing main {
 
   .color-editor-actions button {
     min-height: 50px;
+  }
+}
+
+@media (min-width: 681px) and (pointer: coarse),
+  (min-width: 681px) and (any-pointer: coarse),
+  (min-width: 681px) and (hover: none) {
+  .editor-layout {
+    grid-template-columns: min(50vw, 390px) minmax(0, 1fr);
+  }
+
+  .grid-detect-row {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 7px;
+  }
+
+  .field-row {
+    grid-template-columns: minmax(0, 1fr) 13px minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .grid-number-label small {
+    display: none;
+  }
+
+  .grid-stepper {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: white;
+    grid-template-columns: 40px minmax(34px, 1fr) 40px;
+  }
+
+  .grid-stepper button {
+    display: grid;
+    min-width: 40px;
+    height: 42px;
+    padding: 0;
+    border: 0;
+    color: var(--ink);
+    background: #f2efe8;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 750;
+    place-items: center;
+    touch-action: manipulation;
+  }
+
+  .grid-stepper button:active {
+    background: #e5e1d8;
+  }
+
+  .grid-stepper input {
+    height: 42px;
+    padding: 0 2px;
+    border-top: 0;
+    border-bottom: 0;
+    border-radius: 0;
+    text-align: center;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
+  .grid-stepper input::-webkit-inner-spin-button,
+  .grid-stepper input::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+
+  .field-row > span {
+    display: grid;
+    height: 42px;
+    padding: 0;
+    align-self: end;
+    place-items: center;
+  }
+
+  .detect-compact {
+    width: 44px;
+    min-height: 42px;
+    padding: 0;
+    overflow: hidden;
+    font-size: 0;
+  }
+
+  .detect-compact svg {
+    width: 18px;
+    height: 18px;
   }
 }
 

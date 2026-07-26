@@ -1,11 +1,13 @@
-const CACHE_NAME = "dougao-v53";
+const CACHE_NAME = "dougao-v54";
+const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
+const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles-v53.css",
-  "./app-v53.js",
-  "./manifest-v53.webmanifest",
+  "./styles-v54.css",
+  "./app-v54.js",
+  "./manifest-v54.webmanifest",
   "./favicon.svg",
   "./og.png",
 ];
@@ -23,13 +25,42 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith("dougao-v") && key !== CACHE_NAME)
+            .map((key) => caches.delete(key)),
+        ),
+      ),
   );
   self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const requestUrl = new URL(event.request.url);
+  if (
+    requestUrl.origin === self.location.origin &&
+    requestUrl.pathname.startsWith(DOWNLOAD_PATH_PREFIX)
+  ) {
+    event.respondWith(
+      caches
+        .open(DOWNLOAD_CACHE_NAME)
+        .then((cache) => cache.match(event.request.url))
+        .then(
+          (response) =>
+            response ||
+            new Response("Download expired", {
+              status: 404,
+              headers: {
+                "Cache-Control": "no-store",
+                "Content-Type": "text/plain; charset=utf-8",
+              },
+            }),
+        ),
+    );
+    return;
+  }
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request)

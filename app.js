@@ -12,6 +12,8 @@
     hasDocument && typeof window.matchMedia === "function"
       ? window.matchMedia("(pointer: coarse)")
       : { matches: false };
+  const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
+  const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
 
   const elements = {
     hero: $("#hero"),
@@ -1990,10 +1992,8 @@
   async function processImage({ resetHistory = false, preservePalette = false } = {}) {
     if (!state.image) return;
     if (!preservePalette) cancelColorPick({ redraw: false });
-    state.cols = clamp(Math.round(Number(elements.gridCols.value) || 32), 2, 200);
-    state.rows = clamp(Math.round(Number(elements.gridRows.value) || 32), 2, 200);
-    elements.gridCols.value = state.cols;
-    elements.gridRows.value = state.rows;
+    state.cols = clamp(Math.round(Number(state.cols) || 32), 2, 200);
+    state.rows = clamp(Math.round(Number(state.rows) || 32), 2, 200);
     readCrop();
     saveSettings();
 
@@ -2920,7 +2920,11 @@
   }
 
   function usesMobileSaveFlow() {
-    return mobileLayoutQuery.matches || coarsePointerQuery.matches;
+    return (
+      mobileLayoutQuery.matches ||
+      coarsePointerQuery.matches ||
+      new URLSearchParams(window.location.search).get("debug") === "mobile-export"
+    );
   }
 
   function forcesExportFailureForTesting() {
@@ -2951,9 +2955,18 @@
 
   function triggerBlobDownload(blob, extension, { openInNewTab = false } = {}) {
     const url = openInNewTab ? ensureExportObjectUrl(blob) : URL.createObjectURL(blob);
+    dispatchDownloadAnchor(url, `${state.fileName || "拼豆图纸"}.${extension}`, {
+      openInNewTab,
+    });
+    if (!openInNewTab) {
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
+  }
+
+  function dispatchDownloadAnchor(url, fileName, { openInNewTab = false } = {}) {
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${state.fileName || "拼豆图纸"}.${extension}`;
+    anchor.download = fileName;
     if (openInNewTab) {
       anchor.target = "_blank";
       anchor.rel = "noopener";
@@ -2962,9 +2975,81 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    if (!openInNewTab) {
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function encodeDispositionFileName(fileName) {
+    return encodeURIComponent(fileName).replace(
+      /['()*]/g,
+      (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
+  }
+
+  async function getReadyServiceWorker(timeout = 1800) {
+    if (!("serviceWorker" in navigator)) {
+      throw new Error("Service Worker unsupported");
     }
+    let timer;
+    try {
+      return await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Service Worker readiness timeout")), timeout);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function pruneLocalDownloadCache(cache, maxAge = 10 * 60 * 1000) {
+    const requests = await cache.keys();
+    const cutoff = Date.now() - maxAge;
+    await Promise.all(
+      requests.map((request) => {
+        const match = new URL(request.url).pathname.match(
+          /^\/__dougao_download__\/(\d+)-/,
+        );
+        return match && Number(match[1]) < cutoff ? cache.delete(request) : false;
+      }),
+    );
+  }
+
+  async function triggerServiceWorkerDownload(blob, extension) {
+    if (!window.isSecureContext || !("caches" in window)) {
+      throw new Error("Cache Storage unavailable");
+    }
+    const registration = await getReadyServiceWorker();
+    if (!registration.active) {
+      throw new Error("Service Worker inactive");
+    }
+
+    const fileName = `${state.fileName || "拼豆图纸"}.${extension}`;
+    const fallbackName = `dougao-pattern.${extension.replace(/[^a-z0-9]/gi, "") || "bin"}`;
+    const token = `${Date.now()}-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+    const downloadUrl = new URL(
+      `${DOWNLOAD_PATH_PREFIX}${token}/${encodeURIComponent(fileName)}`,
+      location.origin,
+    );
+    const headers = new Headers({
+      "Cache-Control": "private, max-age=0",
+      "Content-Disposition": `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeDispositionFileName(fileName)}`,
+      "Content-Type": blob.type || "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+    });
+    const cache = await caches.open(DOWNLOAD_CACHE_NAME);
+    await pruneLocalDownloadCache(cache);
+    await cache.put(downloadUrl.href, new Response(blob, { status: 200, headers }));
+    dispatchDownloadAnchor(downloadUrl.href, fileName, { openInNewTab: true });
+    setTimeout(() => {
+      void caches
+        .open(DOWNLOAD_CACHE_NAME)
+        .then((downloadCache) => downloadCache.delete(downloadUrl.href))
+        .catch(() => {});
+    }, 10 * 60 * 1000);
+    return {
+      controller: Boolean(navigator.serviceWorker.controller),
+      url: downloadUrl.href,
+    };
   }
 
   function getWebSharePolicyStatus() {
@@ -3111,22 +3196,42 @@
     }
   }
 
-  function tryPendingExportDownload({ primary = false } = {}) {
+  async function tryPendingExportDownload({ primary = false } = {}) {
     const pending = state.pendingExport;
     if (!pending) return;
     addExportDiagnostic("download.activation", userActivationStatus());
     try {
-      triggerBlobDownload(pending.blob, pending.extension, { openInNewTab: true });
-      addExportDiagnostic("download.request", "anchor.click dispatched");
+      const result = await triggerServiceWorkerDownload(pending.blob, pending.extension);
+      addExportDiagnostic("download.strategy", "service-worker attachment");
+      addExportDiagnostic("download.swController", result.controller);
+      addExportDiagnostic("download.activation.afterPrepare", userActivationStatus());
+      addExportDiagnostic("download.request", "same-origin attachment link dispatched");
       showExportRecovery(
         primary
-          ? "浏览器应已显示下载位置选择。如果没有弹出，请改用系统分享或页面内预览。"
-          : "已再次向浏览器发出下载请求。如果仍然没有反应，请改用系统分享或页面内预览。",
-        { title: "已请求浏览器下载" },
+          ? "已通过本机兼容通道发出下载请求。它不会上传图片；如果仍然没有反应，请使用页面内预览。"
+          : "已再次通过本机兼容通道发出下载请求。如果仍然没有反应，请使用页面内预览。",
+        { title: "已请求兼容下载" },
       );
     } catch (error) {
-      addExportDiagnostic("download.error", `${error?.name || "Error"}: ${error?.message || ""}`);
-      showExportRecovery("浏览器下载请求执行失败。请使用“页面内预览”并复制诊断信息。");
+      addExportDiagnostic(
+        "download.compatibility.error",
+        `${error?.name || "Error"}: ${error?.message || ""}`,
+      );
+      try {
+        triggerBlobDownload(pending.blob, pending.extension, { openInNewTab: true });
+        addExportDiagnostic("download.strategy", "blob fallback");
+        addExportDiagnostic("download.request", "blob anchor.click dispatched");
+        showExportRecovery(
+          "本机兼容通道不可用，已退回普通浏览器下载。如果仍然没有反应，请使用页面内预览。",
+          { title: "已请求普通下载" },
+        );
+      } catch (fallbackError) {
+        addExportDiagnostic(
+          "download.fallback.error",
+          `${fallbackError?.name || "Error"}: ${fallbackError?.message || ""}`,
+        );
+        showExportRecovery("浏览器下载请求执行失败。请使用“页面内预览”并复制诊断信息。");
+      }
     }
   }
 
@@ -3183,7 +3288,7 @@
   async function finishBlobExport(blob, extension, label) {
     beginExportDiagnostics(blob, extension, label);
     if (usesMobileSaveFlow()) {
-      tryPendingExportDownload({ primary: true });
+      void tryPendingExportDownload({ primary: true });
       return;
     }
     triggerBlobDownload(blob, extension);
@@ -3400,16 +3505,74 @@
     processImage({ resetHistory: true, preservePalette: true });
   }, 320);
 
-  function updateGridFromInputs() {
-    const cols = clamp(Math.round(Number(elements.gridCols.value) || state.cols), 2, 200);
-    const rows = clamp(Math.round(Number(elements.gridRows.value) || state.rows), 2, 200);
-    state.cols = cols;
-    state.rows = rows;
-    elements.gridCols.value = String(cols);
-    elements.gridRows.value = String(rows);
+  function gridValueForInput(input) {
+    return input === elements.gridCols ? state.cols : state.rows;
+  }
+
+  function setGridValueForInput(input, value) {
+    if (input === elements.gridCols) state.cols = value;
+    else state.rows = value;
+  }
+
+  function clearGridDraftWarning(input) {
+    input.classList.remove("draft-invalid");
+    input.removeAttribute("aria-invalid");
+    input.removeAttribute("title");
+  }
+
+  function markGridDraftInvalid(input) {
+    input.classList.add("draft-invalid");
+    input.setAttribute("aria-invalid", "true");
+    input.title = `请输入 ${input.min || 2}–${input.max || 200} 之间的整数；离开输入框后会自动修正。`;
+    elements.detectHint.textContent = `当前输入尚未生效；请输入 ${input.min || 2}–${input.max || 200} 之间的整数。`;
+  }
+
+  function applyGridValues() {
     drawSourceThumb();
-    elements.detectHint.textContent = `已手动设为 ${cols} × ${rows}，正在自动更新图纸；“重新识别”会重新推测行列数。`;
+    elements.detectHint.textContent = `已手动设为 ${state.cols} × ${state.rows}，正在自动更新图纸；“重新识别”会重新推测行列数。`;
     processDebounced();
+  }
+
+  function updateGridDraft(input) {
+    const raw = input.value.trim();
+    const numeric = Number(raw);
+    const min = Number(input.min) || 2;
+    const max = Number(input.max) || 200;
+    if (
+      raw === "" ||
+      !Number.isFinite(numeric) ||
+      !Number.isInteger(numeric) ||
+      numeric < min ||
+      numeric > max
+    ) {
+      markGridDraftInvalid(input);
+      return false;
+    }
+
+    clearGridDraftWarning(input);
+    if (gridValueForInput(input) === numeric) return true;
+    setGridValueForInput(input, numeric);
+    applyGridValues();
+    return true;
+  }
+
+  function commitGridDraft(input) {
+    const raw = input.value.trim();
+    const numeric = Number(raw);
+    const min = Number(input.min) || 2;
+    const max = Number(input.max) || 200;
+    const committed =
+      raw === "" || !Number.isFinite(numeric)
+        ? gridValueForInput(input)
+        : clamp(Math.round(numeric), min, max);
+    input.value = String(committed);
+    clearGridDraftWarning(input);
+    if (gridValueForInput(input) !== committed) {
+      setGridValueForInput(input, committed);
+      applyGridValues();
+    } else {
+      elements.detectHint.textContent = `当前为 ${state.cols} × ${state.rows}；手动修改会立即更新图纸。`;
+    }
   }
 
   function adjustGridInput(targetId, delta) {
@@ -3417,9 +3580,18 @@
     if (!input) return;
     const min = Number(input.min) || 2;
     const max = Number(input.max) || 200;
-    const current = Math.round(Number(input.value) || (targetId === "gridCols" ? state.cols : state.rows));
-    input.value = String(clamp(current + delta, min, max));
-    updateGridFromInputs();
+    const numeric = Number(input.value);
+    const current =
+      input.value.trim() !== "" && Number.isFinite(numeric)
+        ? clamp(Math.round(numeric), min, max)
+        : gridValueForInput(input);
+    const next = clamp(current + delta, min, max);
+    input.value = String(next);
+    clearGridDraftWarning(input);
+    if (gridValueForInput(input) !== next) {
+      setGridValueForInput(input, next);
+      applyGridValues();
+    }
   }
 
   function setMobileControlPanelHeight(index = state.mobileControlIndex) {
@@ -3660,15 +3832,21 @@
       input.addEventListener("input", cropDebounced);
     }
     for (const input of [elements.gridCols, elements.gridRows]) {
-      input.addEventListener("input", updateGridFromInputs);
+      input.addEventListener("input", () => updateGridDraft(input));
+      input.addEventListener("blur", () => commitGridDraft(input));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        }
+      });
       input.addEventListener(
         "wheel",
         (event) => {
           if (!event.deltaY) return;
           event.preventDefault();
           const amount = event.shiftKey ? 5 : 1;
-          input.value = String(clamp((Number(input.value) || 2) + (event.deltaY < 0 ? amount : -amount), 2, 200));
-          updateGridFromInputs();
+          adjustGridInput(input.id, event.deltaY < 0 ? amount : -amount);
         },
         { passive: false },
       );
@@ -3799,7 +3977,7 @@
       else if (type === "print") exportPdf();
     });
     elements.retryExportShare.addEventListener("click", () => void trySharePendingExport());
-    elements.tryExportDownload.addEventListener("click", tryPendingExportDownload);
+    elements.tryExportDownload.addEventListener("click", () => void tryPendingExportDownload());
     elements.previewExportFile.addEventListener("click", () => void previewPendingExport());
     elements.copyExportDiagnostics.addEventListener("click", () => void copyExportDiagnostics());
     elements.exportDialog.addEventListener("close", () => resetExportRecovery());
@@ -3837,7 +4015,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v53.js").catch(() => {});
+      navigator.serviceWorker.register("./sw-v54.js").catch(() => {});
     }
     window.addEventListener(
       "load",
