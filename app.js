@@ -93,6 +93,19 @@
     helpDialog: $("#helpDialog"),
     exportButton: $("#exportButton"),
     exportDialog: $("#exportDialog"),
+    exportRecovery: $("#exportRecovery"),
+    exportRecoveryTitle: $("#exportRecoveryTitle"),
+    exportRecoveryMessage: $("#exportRecoveryMessage"),
+    retryExportShare: $("#retryExportShare"),
+    tryExportDownload: $("#tryExportDownload"),
+    previewExportFile: $("#previewExportFile"),
+    exportInlinePreview: $("#exportInlinePreview"),
+    exportPreviewImage: $("#exportPreviewImage"),
+    exportPreviewText: $("#exportPreviewText"),
+    exportPreviewHint: $("#exportPreviewHint"),
+    exportDiagnostics: $("#exportDiagnostics"),
+    copyExportDiagnostics: $("#copyExportDiagnostics"),
+    printSheet: $("#printSheet"),
     toast: $("#toast"),
   };
 
@@ -149,6 +162,9 @@
     mobileControlIndex: 0,
     exportPngBlob: null,
     exportPngGeneration: 0,
+    pendingExport: null,
+    exportDiagnostics: [],
+    exportObjectUrl: "",
   };
 
   const labels = {
@@ -2907,6 +2923,10 @@
     return mobileLayoutQuery.matches || coarsePointerQuery.matches;
   }
 
+  function forcesExportFailureForTesting() {
+    return new URLSearchParams(window.location.search).get("debug") === "mobile-export";
+  }
+
   function makeExportFile(blob, extension) {
     const fileName = `${state.fileName || "拼豆图纸"}.${extension}`;
     const shareType =
@@ -2916,12 +2936,25 @@
     return new File([blob], fileName, { type: shareType });
   }
 
-  function triggerBlobDownload(blob, extension) {
-    const url = URL.createObjectURL(blob);
+  function ensureExportObjectUrl(blob) {
+    if (!state.exportObjectUrl) {
+      state.exportObjectUrl = URL.createObjectURL(blob);
+    }
+    return state.exportObjectUrl;
+  }
+
+  function revokeExportObjectUrl() {
+    if (!state.exportObjectUrl) return;
+    URL.revokeObjectURL(state.exportObjectUrl);
+    state.exportObjectUrl = "";
+  }
+
+  function triggerBlobDownload(blob, extension, { openInNewTab = false } = {}) {
+    const url = openInNewTab ? ensureExportObjectUrl(blob) : URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `${state.fileName || "拼豆图纸"}.${extension}`;
-    if (usesMobileSaveFlow()) {
+    if (openInNewTab) {
       anchor.target = "_blank";
       anchor.rel = "noopener";
     }
@@ -2929,45 +2962,233 @@
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), usesMobileSaveFlow() ? 60000 : 5000);
+    if (!openInNewTab) {
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }
   }
 
-  async function saveBlob(blob, extension) {
-    if (
-      usesMobileSaveFlow() &&
-      typeof File === "function" &&
-      typeof navigator.canShare === "function" &&
-      typeof navigator.share === "function"
-    ) {
-      try {
-        const file = makeExportFile(blob, extension);
-        if (navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: file.name,
-          });
-          return "shared";
-        }
-      } catch (error) {
-        if (error?.name === "AbortError") return "cancelled";
+  function getWebSharePolicyStatus() {
+    try {
+      const policy = document.permissionsPolicy || document.featurePolicy;
+      if (typeof policy?.allowsFeature === "function") {
+        return String(policy.allowsFeature("web-share"));
       }
+    } catch (error) {
+      return `error:${error?.name || "unknown"}`;
+    }
+    return "unknown";
+  }
+
+  function getTopLevelStatus() {
+    try {
+      return String(window.top === window);
+    } catch {
+      return "cross-origin";
+    }
+  }
+
+  function userActivationStatus() {
+    if (!navigator.userActivation) return "unsupported";
+    return `active=${navigator.userActivation.isActive}; ever=${navigator.userActivation.hasBeenActive}`;
+  }
+
+  function renderExportDiagnostics() {
+    elements.exportDiagnostics.textContent = state.exportDiagnostics.join("\n");
+  }
+
+  function addExportDiagnostic(name, value) {
+    state.exportDiagnostics.push(`${name}: ${String(value)}`);
+    renderExportDiagnostics();
+  }
+
+  function resetExportRecovery({ clearPending = true } = {}) {
+    elements.exportRecovery.hidden = true;
+    elements.exportInlinePreview.hidden = true;
+    elements.exportPreviewImage.hidden = true;
+    elements.exportPreviewImage.removeAttribute("src");
+    elements.exportPreviewText.hidden = true;
+    elements.exportPreviewText.textContent = "";
+    elements.exportPreviewHint.textContent = "";
+    if (clearPending) {
+      state.pendingExport = null;
+      state.exportDiagnostics = [];
+      elements.exportDiagnostics.textContent = "";
+      revokeExportObjectUrl();
+    }
+  }
+
+  function beginExportDiagnostics(blob, extension, label) {
+    resetExportRecovery();
+    state.pendingExport = { blob, extension, label };
+    state.exportDiagnostics = [
+      `time: ${new Date().toISOString()}`,
+      `format: ${extension}`,
+      `label: ${label}`,
+      `blob.type: ${blob.type || "(empty)"}`,
+      `blob.size: ${blob.size}`,
+      `secureContext: ${window.isSecureContext}`,
+      `topLevel: ${getTopLevelStatus()}`,
+      `webSharePolicy: ${getWebSharePolicyStatus()}`,
+      `navigator.share: ${typeof navigator.share}`,
+      `navigator.canShare: ${typeof navigator.canShare}`,
+      `userActivation.initial: ${userActivationStatus()}`,
+      `mobileLayout: ${mobileLayoutQuery.matches}`,
+      `coarsePointer: ${coarsePointerQuery.matches}`,
+      `userAgent: ${navigator.userAgent}`,
+    ];
+    renderExportDiagnostics();
+  }
+
+  function showExportRecovery(message, { title = "这次导出没有完成" } = {}) {
+    elements.exportRecoveryTitle.textContent = title;
+    elements.exportRecoveryMessage.textContent = message;
+    elements.exportRecovery.hidden = false;
+    elements.retryExportShare.disabled =
+      typeof File !== "function" ||
+      typeof navigator.canShare !== "function" ||
+      typeof navigator.share !== "function";
+    requestAnimationFrame(() => {
+      elements.exportRecovery.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+
+  async function trySharePendingExport() {
+    const pending = state.pendingExport;
+    if (!pending) return;
+    addExportDiagnostic("share.activation.before", userActivationStatus());
+
+    if (forcesExportFailureForTesting()) {
+      addExportDiagnostic("share.result", "forced failure for local testing");
+      showExportRecovery("本地调试模式已模拟系统分享失败，文件和诊断信息都已保留。");
+      return;
     }
 
-    triggerBlobDownload(blob, extension);
-    return usesMobileSaveFlow() ? "fallback" : "downloaded";
+    if (
+      typeof File !== "function" ||
+      typeof navigator.canShare !== "function" ||
+      typeof navigator.share !== "function"
+    ) {
+      addExportDiagnostic("share.result", "unsupported");
+      showExportRecovery("这个浏览器没有提供文件分享接口。你可以改用浏览器下载，或先在页面内确认文件内容。");
+      return;
+    }
+
+    let file;
+    try {
+      file = makeExportFile(pending.blob, pending.extension);
+      addExportDiagnostic("file.name", file.name);
+      addExportDiagnostic("file.type", file.type || "(empty)");
+      const canShare = navigator.canShare({ files: [file] });
+      addExportDiagnostic("canShare.files", canShare);
+      if (!canShare) {
+        showExportRecovery("系统不接受这种文件格式的分享。你可以改用浏览器下载，或先在页面内确认文件内容。");
+        return;
+      }
+    } catch (error) {
+      addExportDiagnostic("canShare.error", `${error?.name || "Error"}: ${error?.message || ""}`);
+      showExportRecovery("检查系统分享能力时发生错误。诊断信息已保留，可以改用另外两种方式。");
+      return;
+    }
+
+    try {
+      await navigator.share({
+        files: [file],
+        title: file.name,
+      });
+      addExportDiagnostic("share.result", "resolved");
+      safeCloseModal(elements.exportDialog);
+      showToast(`${pending.label}已交给系统保存 / 分享`);
+    } catch (error) {
+      addExportDiagnostic("share.result", "rejected");
+      addExportDiagnostic("share.error.name", error?.name || "Error");
+      addExportDiagnostic("share.error.message", error?.message || "(empty)");
+      addExportDiagnostic("share.activation.after", userActivationStatus());
+      const message =
+        error?.name === "AbortError"
+          ? "系统面板已关闭，文件尚未确认保存。你可以再试一次，或改用下面的独立操作。"
+          : `系统没有完成保存（${error?.name || "未知错误"}）。你可以改用下面的独立操作。`;
+      showExportRecovery(message);
+    }
+  }
+
+  function tryPendingExportDownload({ primary = false } = {}) {
+    const pending = state.pendingExport;
+    if (!pending) return;
+    addExportDiagnostic("download.activation", userActivationStatus());
+    try {
+      triggerBlobDownload(pending.blob, pending.extension, { openInNewTab: true });
+      addExportDiagnostic("download.request", "anchor.click dispatched");
+      showExportRecovery(
+        primary
+          ? "浏览器应已显示下载位置选择。如果没有弹出，请改用系统分享或页面内预览。"
+          : "已再次向浏览器发出下载请求。如果仍然没有反应，请改用系统分享或页面内预览。",
+        { title: "已请求浏览器下载" },
+      );
+    } catch (error) {
+      addExportDiagnostic("download.error", `${error?.name || "Error"}: ${error?.message || ""}`);
+      showExportRecovery("浏览器下载请求执行失败。请使用“页面内预览”并复制诊断信息。");
+    }
+  }
+
+  async function previewPendingExport() {
+    const pending = state.pendingExport;
+    if (!pending) return;
+    addExportDiagnostic("preview.activation", userActivationStatus());
+    elements.exportInlinePreview.hidden = false;
+
+    if (pending.blob.type.startsWith("image/")) {
+      elements.exportPreviewImage.src = ensureExportObjectUrl(pending.blob);
+      elements.exportPreviewImage.hidden = false;
+      elements.exportPreviewText.hidden = true;
+      elements.exportPreviewHint.textContent = "文件已在本页生成。手机上可长按图片，尝试保存到相册或系统文件。";
+      addExportDiagnostic("preview.result", "inline image");
+    } else {
+      try {
+        const text = await pending.blob.text();
+        const previewLimit = 20000;
+        elements.exportPreviewText.textContent =
+          text.length > previewLimit
+            ? `${text.slice(0, previewLimit)}\n\n……预览已截断，完整文件仍保留。`
+            : text;
+        elements.exportPreviewText.hidden = false;
+        elements.exportPreviewImage.hidden = true;
+        elements.exportPreviewHint.textContent = "这里显示的是浏览器内存中的文件内容，仅用于确认导出已经生成。";
+        addExportDiagnostic("preview.result", `inline text (${text.length} chars)`);
+      } catch (error) {
+        addExportDiagnostic("preview.error", `${error?.name || "Error"}: ${error?.message || ""}`);
+        elements.exportPreviewHint.textContent = "浏览器无法读取预览内容，请复制诊断信息。";
+      }
+    }
+    elements.exportInlinePreview.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  async function copyExportDiagnostics() {
+    const report = state.exportDiagnostics.join("\n");
+    try {
+      await navigator.clipboard.writeText(report);
+      showToast("诊断信息已复制");
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = report;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      showToast(copied ? "诊断信息已复制" : "复制失败，请长按诊断文本手动复制");
+    }
   }
 
   async function finishBlobExport(blob, extension, label) {
-    const result = await saveBlob(blob, extension);
-    if (result === "cancelled") return;
-    safeCloseModal(elements.exportDialog);
-    if (result === "shared") {
-      showToast(`${label}已交给系统保存 / 分享`);
-    } else if (result === "fallback") {
-      showToast("已请求保存；若打开预览，请从浏览器菜单保存");
-    } else {
-      showToast(`${label}已下载`);
+    beginExportDiagnostics(blob, extension, label);
+    if (usesMobileSaveFlow()) {
+      tryPendingExportDownload({ primary: true });
+      return;
     }
+    triggerBlobDownload(blob, extension);
+    safeCloseModal(elements.exportDialog);
+    showToast(`${label}已下载`);
   }
 
   function makeExportCanvas() {
@@ -3052,6 +3273,18 @@
       ctx.fillText(`${reference} · ${color.count} 颗`, legendX + 61, y);
     });
     return canvas;
+  }
+
+  function exportPdf() {
+    try {
+      const canvas = makeExportCanvas();
+      canvas.setAttribute("aria-label", "待打印的高清拼豆图纸");
+      elements.printSheet.replaceChildren(canvas);
+      safeCloseModal(elements.exportDialog);
+      window.print();
+    } catch (error) {
+      showToast(`无法打开打印预览：${error?.name || "未知错误"}`);
+    }
   }
 
   function preparePngExport() {
@@ -3324,6 +3557,7 @@
     });
     elements.exportButton.addEventListener("click", () => {
       if (!state.cells.length) return;
+      resetExportRecovery();
       safeShowModal(elements.exportDialog);
       preparePngExport();
     });
@@ -3562,14 +3796,13 @@
       if (type === "png") exportPng();
       else if (type === "csv") exportCsv();
       else if (type === "json") exportJson();
-      else if (type === "print") {
-        try {
-          window.print();
-        } finally {
-          safeCloseModal(elements.exportDialog);
-        }
-      }
+      else if (type === "print") exportPdf();
     });
+    elements.retryExportShare.addEventListener("click", () => void trySharePendingExport());
+    elements.tryExportDownload.addEventListener("click", tryPendingExportDownload);
+    elements.previewExportFile.addEventListener("click", () => void previewPendingExport());
+    elements.copyExportDiagnostics.addEventListener("click", () => void copyExportDiagnostics());
+    elements.exportDialog.addEventListener("close", () => resetExportRecovery());
 
     window.addEventListener(
       "resize",
@@ -3604,7 +3837,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v52.js").catch(() => {});
+      navigator.serviceWorker.register("./sw-v53.js").catch(() => {});
     }
     window.addEventListener(
       "load",

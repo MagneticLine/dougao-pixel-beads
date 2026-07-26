@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v52.webmanifest" />
-    <link rel="stylesheet" href="./styles-v52.css" />
+    <link rel="manifest" href="./manifest-v53.webmanifest" />
+    <link rel="stylesheet" href="./styles-v53.css" />
   </head>
   <body>
     <header class="topbar">
@@ -318,13 +318,32 @@
         <button class="modal-close" aria-label="关闭">×</button>
         <p class="eyebrow">导出图纸</p>
         <h2>选择你需要的格式</h2>
-        <p class="export-mobile-note">手机端会打开系统保存 / 分享面板，请选择“存储到文件”或浏览器的下载选项。</p>
+        <p class="export-mobile-note">手机端默认使用浏览器下载；如果下载受阻，可改用系统分享或页面内预览。</p>
         <div class="export-options">
           <button type="button" data-export="png"><span>PNG</span><b>高清图纸</b><small>含网格编号和色号表</small></button>
           <button type="button" data-export="csv"><span>CSV</span><b>色号矩阵</b><small>可用表格软件继续编辑</small></button>
           <button type="button" data-export="json"><span>JSON</span><b>工程数据</b><small>保留颜色、数量和网格</small></button>
           <button type="button" data-export="print"><span>PDF</span><b>打印 / 存 PDF</b><small>使用浏览器打印功能</small></button>
         </div>
+        <section id="exportRecovery" class="export-recovery" aria-live="polite" hidden>
+          <strong id="exportRecoveryTitle">这次导出没有完成</strong>
+          <p id="exportRecoveryMessage"></p>
+          <div class="export-recovery-actions">
+            <button id="retryExportShare" type="button">改用系统分享</button>
+            <button id="tryExportDownload" type="button">尝试浏览器下载</button>
+            <button id="previewExportFile" type="button">页面内预览</button>
+          </div>
+          <div id="exportInlinePreview" class="export-inline-preview" hidden>
+            <img id="exportPreviewImage" alt="已生成的导出图纸预览" hidden />
+            <pre id="exportPreviewText" hidden></pre>
+            <small id="exportPreviewHint"></small>
+          </div>
+          <details class="export-diagnostics">
+            <summary>导出诊断</summary>
+            <pre id="exportDiagnostics"></pre>
+            <button id="copyExportDiagnostics" type="button">复制诊断信息</button>
+          </details>
+        </section>
       </form>
     </dialog>
 
@@ -367,7 +386,8 @@
       </form>
     </dialog>
 
+    <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v52.js"></script>
+    <script src="./app-v53.js"></script>
   </body>
 </html>
