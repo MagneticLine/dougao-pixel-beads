@@ -19,21 +19,33 @@
 
 ## 本地使用
 
-直接用浏览器打开 `index.html` 即可使用大部分功能。
+需要 Node.js 22.13 或更高版本。
 
-离线缓存功能需要通过 HTTP 访问；可以使用任意静态文件服务器预览。
+```bash
+npm run dev
+```
+
+然后访问 `http://127.0.0.1:4173/`。本地服务器直接提供 `public` 目录，并使用与 Cloudflare Pages 相同的单页回退规则。离线缓存、剪贴板授权和其他需要安全来源的浏览器功能应以这个本地地址为准测试。
+
+`npm run build` 与 `npm run sync:static` 都会把部署文件同步到 `public`，不需要安装第三方运行时依赖。
 
 ## 部署
 
-整个目录都是静态文件，不需要构建。把以下文件上传到任意静态托管服务的站点根目录即可：
+生产环境由 Cloudflare Pages 连接 GitHub 仓库自动部署：
 
-- `index.html`
-- `styles.css`
-- `app.js`
-- `manifest.webmanifest`
-- `sw.js`
+| 配置 | 内容 |
+| --- | --- |
+| Project name | `dougao-pixel-beads` |
+| Production branch | `main` |
+| Framework preset | `None` |
+| Build command | `npm run sync:static` |
+| Build output directory | `public` |
+| Root directory | 留空 |
+| Environment variables | 不填 |
 
-适合的托管方式包括 GitHub Pages、Cloudflare Pages、Netlify、Vercel 静态站点、对象存储静态网站，以及普通服务器的 Nginx 静态目录。
+线上地址：<https://dougao-pixel-beads.pages.dev/>
+
+部署产物仅包含 `index.html`、`styles.css`、`app.js`、Manifest、Service Worker、图标、分享图片和 Cloudflare `_headers`。项目不包含服务端函数、数据库或图片上传接口。
 
 ## 使用建议
 

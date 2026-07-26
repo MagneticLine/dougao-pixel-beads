@@ -4,10 +4,17 @@
   const hasDocument = typeof document !== "undefined";
   const $ = (selector) => (hasDocument ? document.querySelector(selector) : null);
   const $$ = (selector) => (hasDocument ? [...document.querySelectorAll(selector)] : []);
+  const mobileLayoutQuery =
+    hasDocument && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 680px)")
+      : { matches: false };
 
   const elements = {
     hero: $("#hero"),
     workspace: $("#workspace"),
+    editorLayout: $(".editor-layout"),
+    controls: $(".controls"),
+    mobileControlPanels: $(".mobile-control-panels"),
     dropZone: $("#dropZone"),
     fileInput: $("#fileInput"),
     selectButton: $("#selectButton"),
@@ -135,12 +142,14 @@
     future: [],
     processingToken: 0,
     detectionConfidence: 0,
+    mobileControlIndex: 0,
   };
 
   const labels = {
     denoise: ["关闭", "轻微", "标准", "强力"],
     merge: ["关闭", "轻微", "适中", "明显", "强力"],
   };
+  let mobileControlResizeObserver = null;
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -158,12 +167,11 @@
     const sine = Math.sin(radians);
     const width = state.image.naturalWidth;
     const height = state.image.naturalHeight;
-    const zoom = Math.max(0.01, state.sourceZoom);
-    const dx = (point.x - 0.5 - state.sourcePan.x) * width;
-    const dy = (point.y - 0.5 - state.sourcePan.y) * height;
+    const dx = (point.x - 0.5) * width;
+    const dy = (point.y - 0.5) * height;
     return {
-      x: (cosine * dx + sine * dy) / (width * zoom) + 0.5,
-      y: (-sine * dx + cosine * dy) / (height * zoom) + 0.5,
+      x: (cosine * dx + sine * dy) / width + 0.5,
+      y: (-sine * dx + cosine * dy) / height + 0.5,
     };
   }
 
@@ -598,7 +606,7 @@
       state.matchDrag = null;
       state.previewDrag = null;
       state.previewPosition = null;
-      setLivePreviewCollapsed(window.matchMedia("(max-width: 680px)").matches);
+      setLivePreviewCollapsed(mobileLayoutQuery.matches);
       elements.livePatternPreview.style.removeProperty("left");
       elements.livePatternPreview.style.removeProperty("top");
       elements.livePatternPreview.style.removeProperty("right");
@@ -613,6 +621,7 @@
       elements.rotationValue.value = "0.0°";
       updateFrameMode();
       updateView();
+      syncMobileControlCarousel({ align: true });
       drawSourceThumb();
       window.scrollTo({ top: 0, behavior: "smooth" });
       await autoDetect(true);
@@ -685,6 +694,10 @@
     };
   }
 
+  function projectGridPoint(projector, gridX, gridY, cols = state.cols, rows = state.rows) {
+    return projector(gridX / Math.max(1, cols), gridY / Math.max(1, rows));
+  }
+
   function canvasFramePoint(point) {
     const view = state.sourceView;
     return {
@@ -695,6 +708,10 @@
 
   function sizeSourceEditor() {
     if (!state.image || state.view === "result") {
+      elements.canvasStage.style.removeProperty("height");
+      return;
+    }
+    if (mobileLayoutQuery.matches) {
       elements.canvasStage.style.removeProperty("height");
       return;
     }
@@ -718,11 +735,18 @@
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const width = canvas.width * state.sourceZoom;
-    const height = canvas.height * state.sourceZoom;
-    const x = (canvas.width - width) / 2 + state.sourcePan.x * canvas.width;
-    const y = (canvas.height - height) / 2 + state.sourcePan.y * canvas.height;
-    state.sourceView = { x: 0, y: 0, width: canvas.width, height: canvas.height, dpr };
+    const imageAspect = state.image.naturalWidth / Math.max(1, state.image.naturalHeight);
+    let fittedWidth = canvas.width;
+    let fittedHeight = fittedWidth / imageAspect;
+    if (fittedHeight > canvas.height) {
+      fittedHeight = canvas.height;
+      fittedWidth = fittedHeight * imageAspect;
+    }
+    const width = fittedWidth * state.sourceZoom;
+    const height = fittedHeight * state.sourceZoom;
+    const x = (canvas.width - width) / 2 + state.sourcePan.x * width;
+    const y = (canvas.height - height) / 2 + state.sourcePan.y * height;
+    state.sourceView = { x, y, width, height, dpr };
     ctx.save();
     ctx.translate(x + width / 2, y + height / 2);
     ctx.rotate((state.rotation * Math.PI) / 180);
@@ -740,34 +764,34 @@
     ctx.closePath();
     ctx.fill("evenodd");
 
-    const strokeCalibrationGridLine = (start, end, major) => {
+    const strokeCalibrationGridLine = (start, end) => {
       ctx.shadowColor = "transparent";
       ctx.globalCompositeOperation = "difference";
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-      ctx.lineWidth = (major ? 1.65 : 1.05) * dpr;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.6 * dpr;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
       ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = major ? "rgba(232, 22, 31, 0.98)" : "rgba(236, 28, 36, 0.9)";
-      ctx.lineWidth = (major ? 0.82 : 0.48) * dpr;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1 * dpr;
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
       ctx.lineTo(end.x, end.y);
       ctx.stroke();
     };
-    for (let col = 0; col <= state.cols; col += 1) {
-      const u = col / state.cols;
-      const start = canvasFramePoint(projector(u, 0));
-      const end = canvasFramePoint(projector(u, 1));
-      strokeCalibrationGridLine(start, end, col % 5 === 0);
+    // The outer border is drawn separately so the difference fringe on inner
+    // lines cannot tint it cyan/green against bright or saturated pixels.
+    for (let col = 1; col < state.cols; col += 1) {
+      const start = canvasFramePoint(projectGridPoint(projector, col, 0));
+      const end = canvasFramePoint(projectGridPoint(projector, col, state.rows));
+      strokeCalibrationGridLine(start, end);
     }
-    for (let row = 0; row <= state.rows; row += 1) {
-      const v = row / state.rows;
-      const start = canvasFramePoint(projector(0, v));
-      const end = canvasFramePoint(projector(1, v));
-      strokeCalibrationGridLine(start, end, row % 5 === 0);
+    for (let row = 1; row < state.rows; row += 1) {
+      const start = canvasFramePoint(projectGridPoint(projector, 0, row));
+      const end = canvasFramePoint(projectGridPoint(projector, state.cols, row));
+      strokeCalibrationGridLine(start, end);
     }
 
     const traceFrame = () => {
@@ -779,10 +803,10 @@
     ctx.shadowColor = "transparent";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
-    ctx.lineWidth = 1.8 * dpr;
-    ctx.shadowColor = "rgba(0, 0, 0, 0.72)";
-    ctx.shadowBlur = 1.1 * dpr;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.99)";
+    ctx.lineWidth = 1.45 * dpr;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.82)";
+    ctx.shadowBlur = 0.9 * dpr;
     traceFrame();
     ctx.stroke();
     ctx.shadowColor = "transparent";
@@ -808,7 +832,7 @@
       "aria-label",
       picking
         ? `正在为图纸颜色 ${state.palette[state.colorPickTarget].name} 吸取匹配色；点击原图中的目标颜色`
-        : `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度；框内拖动整个框，框外拖动图片，角点调整边界`,
+        : `${activeSourceMode() === "photo" ? "实物照片" : "像素图"}大图校准，当前 ${state.cols} 列 × ${state.rows} 行，旋转 ${state.rotation.toFixed(1)} 度；框内拖动整个框，框外拖动画布，角点调整边界`,
     );
     canvas.dataset.panX = state.sourcePan.x.toFixed(4);
     canvas.dataset.panY = state.sourcePan.y.toFixed(4);
@@ -843,14 +867,19 @@
     return result;
   }
 
-  function makeRectifiedCanvas(maxSide = 520) {
+  function makeRectifiedCanvas(
+    maxSide = 520,
+    viewport = { left: 0, right: 1, top: 0, bottom: 1 },
+  ) {
     const points = getFramePixels();
     const top = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
     const bottom = Math.hypot(points[2].x - points[3].x, points[2].y - points[3].y);
     const left = Math.hypot(points[3].x - points[0].x, points[3].y - points[0].y);
     const right = Math.hypot(points[2].x - points[1].x, points[2].y - points[1].y);
-    const naturalWidth = Math.max(2, (top + bottom) / 2);
-    const naturalHeight = Math.max(2, (left + right) / 2);
+    const spanU = Math.max(0.01, viewport.right - viewport.left);
+    const spanV = Math.max(0.01, viewport.bottom - viewport.top);
+    const naturalWidth = Math.max(2, ((top + bottom) / 2) * spanU);
+    const naturalHeight = Math.max(2, ((left + right) / 2) * spanV);
     const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(2, Math.round(naturalWidth * scale));
@@ -862,7 +891,10 @@
     for (let y = 0; y < canvas.height; y += 1) {
       for (let x = 0; x < canvas.width; x += 1) {
         const point = viewPointToSource(
-          projector((x + 0.5) / canvas.width, (y + 0.5) / canvas.height),
+          projector(
+            viewport.left + ((x + 0.5) / canvas.width) * spanU,
+            viewport.top + ((y + 0.5) / canvas.height) * spanV,
+          ),
         );
         const color = readSourcePixel(source, point.x, point.y);
         const index = (y * canvas.width + x) * 4;
@@ -920,8 +952,8 @@
     const canvasY = ((event.clientY - rect.top) / rect.height) * elements.sourceCanvas.height;
     const view = state.sourceView;
     return {
-      x: clamp((canvasX - view.x) / view.width, 0, 1),
-      y: clamp((canvasY - view.y) / view.height, 0, 1),
+      x: (canvasX - view.x) / view.width,
+      y: (canvasY - view.y) / view.height,
       canvasX,
       canvasY,
     };
@@ -963,8 +995,10 @@
       type: corner >= 0 ? "corner" : inside ? "frame" : "pan",
       corner,
       start: { x: point.x, y: point.y },
+      startCanvas: { x: point.canvasX, y: point.canvasY },
       initial: state.frame.map((framePoint) => ({ ...framePoint })),
       initialPan: { ...state.sourcePan },
+      initialView: { ...state.sourceView },
     };
     elements.sourceCanvas.setPointerCapture?.(event.pointerId);
     event.preventDefault();
@@ -1000,12 +1034,16 @@
     }
     const drag = state.frameDrag;
     if (drag.type === "corner") {
+      const cornerPoint = {
+        x: clamp(point.x, 0, 1),
+        y: clamp(point.y, 0, 1),
+      };
       if (state.frameMode === "rect") {
         const opposite = drag.initial[(drag.corner + 2) % 4];
-        const left = Math.min(point.x, opposite.x);
-        const right = Math.max(point.x, opposite.x);
-        const top = Math.min(point.y, opposite.y);
-        const bottom = Math.max(point.y, opposite.y);
+        const left = Math.min(cornerPoint.x, opposite.x);
+        const right = Math.max(cornerPoint.x, opposite.x);
+        const top = Math.min(cornerPoint.y, opposite.y);
+        const bottom = Math.max(cornerPoint.y, opposite.y);
         if (right - left >= 0.03 && bottom - top >= 0.03) {
           state.frame = [
             { x: left, y: top },
@@ -1016,7 +1054,7 @@
         }
       } else {
         const next = drag.initial.map((framePoint) => ({ ...framePoint }));
-        next[drag.corner] = { x: point.x, y: point.y };
+        next[drag.corner] = cornerPoint;
         if (frameIsConvex(next)) state.frame = next;
       }
       syncCropFromFrame();
@@ -1035,8 +1073,8 @@
       }));
       syncCropFromFrame();
     } else {
-      const deltaX = point.x - drag.start.x;
-      const deltaY = point.y - drag.start.y;
+      const deltaX = (point.canvasX - drag.startCanvas.x) / Math.max(1, drag.initialView.width);
+      const deltaY = (point.canvasY - drag.startCanvas.y) / Math.max(1, drag.initialView.height);
       const limit = Math.max(1, (state.sourceZoom + 1) / 2);
       state.sourcePan = {
         x: clamp(drag.initialPan.x + deltaX, -limit, limit),
@@ -1049,12 +1087,15 @@
 
   function finishFramePointer(event) {
     if (!state.frameDrag) return;
+    const dragType = state.frameDrag.type;
     state.frameDrag = null;
     elements.sourceCanvas.releasePointerCapture?.(event.pointerId);
     elements.sourceCanvas.style.cursor = "grab";
-    syncCropFromFrame();
     drawSourceThumb();
-    processImage({ resetHistory: true, preservePalette: true });
+    if (dragType !== "pan") {
+      syncCropFromFrame();
+      processImage({ resetHistory: true, preservePalette: true });
+    }
     event.preventDefault();
   }
 
@@ -1267,50 +1308,124 @@
     return boundaryMean - interiorMean * 0.72;
   }
 
-  function fitAxisGridBounds(edges, count, photoMode) {
+  function fitAxisGridBounds(
+    edges,
+    count,
+    photoMode,
+    expectedStart = 0,
+    expectedEnd = edges.length,
+  ) {
     const length = edges.length;
-    const nominalCell = length / Math.max(1, count);
+    const nominalSpan = expectedEnd - expectedStart;
+    const nominalCell = nominalSpan / Math.max(1, count);
     if (count < 3 || nominalCell < 2.2) {
-      return { start: 0, end: length, changed: false, gain: 0 };
+      return { start: expectedStart, end: expectedEnd, changed: false, gain: 0 };
     }
     const averageEdge =
       edges.reduce((sum, value, index) => sum + (index ? value : 0), 0) /
       Math.max(1, length - 1);
-    const maxTrim = Math.min(
-      length * (photoMode ? 0.065 : 0.105),
-      nominalCell * (photoMode ? 0.72 : 1.18),
-    );
-    const step = Math.max(0.7, nominalCell / 12);
-    const baseline = scoreGridBounds(edges, count, 0, length);
-    let best = { start: 0, end: length, score: baseline };
-    for (let leftTrim = 0; leftTrim <= maxTrim + 0.01; leftTrim += step) {
-      for (let rightTrim = 0; rightTrim <= maxTrim + 0.01; rightTrim += step) {
-        const end = length - rightTrim;
-        if (end - leftTrim < nominalCell * count * 0.78) continue;
-        const rawScore = scoreGridBounds(edges, count, leftTrim, end);
-        const trimCells = (leftTrim + rightTrim) / Math.max(1, nominalCell);
-        const score = rawScore - trimCells * averageEdge * (photoMode ? 0.08 : 0.045);
-        if (score > best.score) best = { start: leftTrim, end, score };
+    const searchCells = photoMode ? 0.95 : 1.6;
+    const maxMove = nominalCell * searchCells;
+    const coarseStep = Math.max(0.55, nominalCell / 14);
+    const baseline = scoreGridBounds(edges, count, expectedStart, expectedEnd);
+    let best = { start: expectedStart, end: expectedEnd, score: baseline };
+
+    const consider = (start, end) => {
+      const span = end - start;
+      if (span < nominalSpan * 0.84 || span > nominalSpan * 1.16) return;
+      if (start < 0 || end > length || end <= start) return;
+      const rawScore = scoreGridBounds(edges, count, start, end);
+      const movementCells =
+        (Math.abs(start - expectedStart) + Math.abs(end - expectedEnd)) /
+        Math.max(1, nominalCell);
+      const score = rawScore - movementCells * averageEdge * (photoMode ? 0.055 : 0.022);
+      if (score > best.score) best = { start, end, score };
+    };
+
+    const search = (centerStart, centerEnd, radius, step) => {
+      for (let start = centerStart - radius; start <= centerStart + radius + 0.01; start += step) {
+        for (let end = centerEnd - radius; end <= centerEnd + radius + 0.01; end += step) {
+          consider(start, end);
+        }
       }
-    }
+    };
+
+    search(expectedStart, expectedEnd, maxMove, coarseStep);
+    const fineStep = Math.max(0.22, coarseStep / 4);
+    search(best.start, best.end, coarseStep, fineStep);
+
     const gain = best.score - baseline;
     const threshold = Math.max(photoMode ? 0.8 : 0.42, averageEdge * (photoMode ? 0.12 : 0.065));
     const changed =
       gain > threshold &&
-      (best.start > nominalCell * 0.08 || length - best.end > nominalCell * 0.08);
+      (Math.abs(best.start - expectedStart) > nominalCell * 0.04 ||
+        Math.abs(best.end - expectedEnd) > nominalCell * 0.04);
     return changed
       ? { ...best, changed, gain }
-      : { start: 0, end: length, changed: false, gain };
+      : { start: expectedStart, end: expectedEnd, changed: false, gain };
+  }
+
+  function makeExpandedGridAnalysis(cols, rows, photoMode) {
+    const paddingCells = photoMode ? 1 : 1.7;
+    const viewport = {
+      left: -paddingCells / Math.max(1, cols),
+      right: 1 + paddingCells / Math.max(1, cols),
+      top: -paddingCells / Math.max(1, rows),
+      bottom: 1 + paddingCells / Math.max(1, rows),
+    };
+    const canvas = makeRectifiedCanvas(720, viewport);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const spanU = viewport.right - viewport.left;
+    const spanV = viewport.bottom - viewport.top;
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      photoMode,
+      viewport,
+      xEdges: buildAxisEdges(imageData, "x", photoMode),
+      yEdges: buildAxisEdges(imageData, "y", photoMode),
+      expectedX: {
+        start: ((0 - viewport.left) / spanU) * canvas.width,
+        end: ((1 - viewport.left) / spanU) * canvas.width,
+      },
+      expectedY: {
+        start: ((0 - viewport.top) / spanV) * canvas.height,
+        end: ((1 - viewport.top) / spanV) * canvas.height,
+      },
+    };
   }
 
   function alignFrameToDetectedGrid(analysis, cols, rows) {
-    const xFit = fitAxisGridBounds(analysis.xEdges, cols, analysis.photoMode);
-    const yFit = fitAxisGridBounds(analysis.yEdges, rows, analysis.photoMode);
+    const expanded = makeExpandedGridAnalysis(cols, rows, analysis.photoMode);
+    const xFit = fitAxisGridBounds(
+      expanded.xEdges,
+      cols,
+      expanded.photoMode,
+      expanded.expectedX.start,
+      expanded.expectedX.end,
+    );
+    const yFit = fitAxisGridBounds(
+      expanded.yEdges,
+      rows,
+      expanded.photoMode,
+      expanded.expectedY.start,
+      expanded.expectedY.end,
+    );
     if (!xFit.changed && !yFit.changed) return false;
-    const left = xFit.changed ? xFit.start / analysis.width : 0;
-    const right = xFit.changed ? xFit.end / analysis.width : 1;
-    const top = yFit.changed ? yFit.start / analysis.height : 0;
-    const bottom = yFit.changed ? yFit.end / analysis.height : 1;
+    const viewport = expanded.viewport;
+    const left = xFit.changed
+      ? viewport.left + (xFit.start / expanded.width) * (viewport.right - viewport.left)
+      : 0;
+    const right = xFit.changed
+      ? viewport.left + (xFit.end / expanded.width) * (viewport.right - viewport.left)
+      : 1;
+    const top = yFit.changed
+      ? viewport.top + (yFit.start / expanded.height) * (viewport.bottom - viewport.top)
+      : 0;
+    const bottom = yFit.changed
+      ? viewport.top + (yFit.end / expanded.height) * (viewport.bottom - viewport.top)
+      : 1;
     const projector = createFrameProjector(state.frame);
     const nextFrame = [
       projector(left, top),
@@ -1462,9 +1577,15 @@
           for (const radius of [0.25, 0.36]) {
             for (let angleIndex = 0; angleIndex < 16; angleIndex += 1) {
               const angle = (Math.PI * 2 * angleIndex) / 16;
-              const u = (col + 0.5 + Math.cos(angle) * radius) / cols;
-              const v = (row + 0.5 + Math.sin(angle) * radius) / rows;
-              const point = viewPointToSource(projector(u, v));
+              const point = viewPointToSource(
+                projectGridPoint(
+                  projector,
+                  col + 0.5 + Math.cos(angle) * radius,
+                  row + 0.5 + Math.sin(angle) * radius,
+                  cols,
+                  rows,
+                ),
+              );
               colors.push(readSourcePixel(source, point.x, point.y));
             }
           }
@@ -1485,9 +1606,12 @@
             for (const offsetY of [-0.14, 0, 0.14]) {
               for (const offsetX of [-0.14, 0, 0.14]) {
                 const point = viewPointToSource(
-                  projector(
-                    (col + 0.5 + shiftX + offsetX) / cols,
-                    (row + 0.5 + shiftY + offsetY) / rows,
+                  projectGridPoint(
+                    projector,
+                    col + 0.5 + shiftX + offsetX,
+                    row + 0.5 + shiftY + offsetY,
+                    cols,
+                    rows,
                   ),
                 );
                 candidateColors.push(readSourcePixel(source, point.x, point.y));
@@ -2967,6 +3091,70 @@
     processDebounced();
   }
 
+  function adjustGridInput(targetId, delta) {
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const min = Number(input.min) || 2;
+    const max = Number(input.max) || 200;
+    const current = Math.round(Number(input.value) || (targetId === "gridCols" ? state.cols : state.rows));
+    input.value = String(clamp(current + delta, min, max));
+    updateGridFromInputs();
+  }
+
+  function setMobileControlPanelHeight(index = state.mobileControlIndex) {
+    if (!elements.mobileControlPanels) return;
+    const panels = $$("[data-control-panel]");
+    if (!mobileLayoutQuery.matches || !panels.length) {
+      elements.mobileControlPanels.style.removeProperty("height");
+      return;
+    }
+    const active = panels[clamp(Math.round(index), 0, panels.length - 1)];
+    if (!active) return;
+    elements.mobileControlPanels.style.height = `${Math.ceil(active.scrollHeight)}px`;
+  }
+
+  function syncMobileEditorOrder() {
+    const { editorLayout, previewPanel, controls } = elements;
+    if (!editorLayout || !previewPanel || !controls) return;
+    const first = mobileLayoutQuery.matches ? previewPanel : controls;
+    const second = mobileLayoutQuery.matches ? controls : previewPanel;
+    if (editorLayout.firstElementChild !== first) editorLayout.insertBefore(first, second);
+  }
+
+  function syncMobileControlCarousel({ align = false, behavior = "auto" } = {}) {
+    const panels = $$("[data-control-panel]");
+    const carousel = elements.mobileControlPanels;
+    if (!carousel || !panels.length) return;
+    if (!mobileLayoutQuery.matches) {
+      carousel.style.removeProperty("height");
+      panels.forEach((panel) => {
+        panel.classList.remove("mobile-active");
+        panel.setAttribute("aria-hidden", "false");
+      });
+      return;
+    }
+    const width = Math.max(1, carousel.clientWidth);
+    const measuredIndex = Math.round(carousel.scrollLeft / width);
+    const nextIndex = clamp(align ? state.mobileControlIndex : measuredIndex, 0, panels.length - 1);
+    state.mobileControlIndex = nextIndex;
+    panels.forEach((panel, panelIndex) => {
+      const active = panelIndex === nextIndex;
+      panel.classList.toggle("mobile-active", active);
+      panel.setAttribute("aria-hidden", "false");
+    });
+    if (align) {
+      carousel.scrollTo({ left: nextIndex * width, behavior });
+    }
+    setMobileControlPanelHeight(nextIndex);
+  }
+
+  function handleMobileControlScroll() {
+    cancelAnimationFrame(handleMobileControlScroll.frame);
+    handleMobileControlScroll.frame = requestAnimationFrame(() => {
+      syncMobileControlCarousel();
+    });
+  }
+
   function setFrameMode(mode) {
     state.frameMode = mode === "free" ? "free" : "rect";
     if (state.frameMode === "rect") {
@@ -3136,7 +3324,6 @@
         y: clamp(state.sourcePan.y + deltaY, -limit, limit),
       };
       drawSourceThumb();
-      preservePaletteDebounced();
       event.preventDefault();
     });
 
@@ -3162,6 +3349,11 @@
         { passive: false },
       );
     }
+    $$("[data-grid-step]").forEach((button) => {
+      button.addEventListener("click", () => {
+        adjustGridInput(button.dataset.gridTarget, Number(button.dataset.gridStep) || 0);
+      });
+    });
     for (const input of [
       elements.denoise,
       elements.colorMerge,
@@ -3173,11 +3365,15 @@
       });
     }
 
-    $$(".section-title").forEach((button) => {
-      button.addEventListener("click", () => {
-        button.setAttribute("aria-expanded", String(button.getAttribute("aria-expanded") !== "true"));
-      });
+    elements.mobileControlPanels?.addEventListener("scroll", handleMobileControlScroll, {
+      passive: true,
     });
+    if (elements.mobileControlPanels && typeof ResizeObserver === "function") {
+      mobileControlResizeObserver = new ResizeObserver(() => {
+        setMobileControlPanelHeight();
+      });
+      $$("[data-control-panel]").forEach((panel) => mobileControlResizeObserver.observe(panel));
+    }
 
     elements.paletteList.addEventListener("pointerdown", startMatchDrag);
     elements.paletteList.addEventListener("pointermove", moveMatchDrag);
@@ -3285,6 +3481,8 @@
     window.addEventListener(
       "resize",
       debounce(() => {
+        syncMobileEditorOrder();
+        syncMobileControlCarousel({ align: true });
         if (!state.image) return;
         sizeSourceEditor();
         drawSourceThumb();
@@ -3308,10 +3506,12 @@
   function init() {
     restoreSettings();
     bindEvents();
+    syncMobileEditorOrder();
+    syncMobileControlCarousel({ align: true });
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw.js?v=31").catch(() => {});
+      navigator.serviceWorker.register("./sw.js?v=50").catch(() => {});
     }
     window.addEventListener(
       "load",

@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest.webmanifest?v=23" />
-    <link rel="stylesheet" href="./styles.css?v=31" />
+    <link rel="manifest" href="./manifest.webmanifest?v=50" />
+    <link rel="stylesheet" href="./styles.css?v=50" />
   </head>
   <body>
     <header class="topbar">
@@ -96,10 +96,15 @@
 
         <div class="editor-layout">
           <aside class="controls" aria-label="图纸参数">
-            <div class="control-section">
-              <button class="section-title" type="button" aria-expanded="true">
-                <span><em>1</em> 网格与框选</span><i>⌃</i>
-              </button>
+            <div class="mobile-control-panels">
+            <div class="control-section mobile-active" id="gridControls" data-control-panel="0">
+              <header class="section-title">
+                <span><em>1</em> 网格与框选</span>
+                <span class="section-swipe-cue" aria-hidden="true">
+                  <i class="swipe-cue-track"></i>
+                  <i class="swipe-cue-dot"></i>
+                </span>
+              </header>
               <div class="section-body">
                 <div class="frame-tools">
                   <label class="mode-field">
@@ -114,7 +119,7 @@
                 </div>
                 <p class="calibration-note">
                   <b>校准说明</b>
-                  <span>在右侧“校准原图”中拖动图片、调整角点；格线和图纸预览会随结果更新。</span>
+                  <span>在右侧“校准原图”中缩放或拖动视图、调整角点；格线和图纸预览会随结果更新。</span>
                 </p>
                 <div class="crop-grid" hidden>
                   <label>左 <input id="cropLeft" type="number" min="0" max="45" value="0" inputmode="numeric" /><span>%</span></label>
@@ -124,22 +129,44 @@
                 </div>
                 <div class="grid-detect-row">
                   <div class="field-row">
-                    <label>列数 <small>可滚轮</small><input id="gridCols" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
+                    <div class="grid-number-field">
+                      <span class="grid-number-label">列数 <small>可滚轮</small></span>
+                      <div class="grid-stepper">
+                        <button type="button" data-grid-target="gridCols" data-grid-step="-1" aria-label="减少列数">−</button>
+                        <input id="gridCols" aria-label="列数" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" />
+                        <button type="button" data-grid-target="gridCols" data-grid-step="1" aria-label="增加列数">＋</button>
+                      </div>
+                    </div>
                     <span>×</span>
-                    <label>行数 <small>可滚轮</small><input id="gridRows" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" /></label>
+                    <div class="grid-number-field">
+                      <span class="grid-number-label">行数 <small>可滚轮</small></span>
+                      <div class="grid-stepper">
+                        <button type="button" data-grid-target="gridRows" data-grid-step="-1" aria-label="减少行数">−</button>
+                        <input id="gridRows" aria-label="行数" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" />
+                        <button type="button" data-grid-target="gridRows" data-grid-step="1" aria-label="增加行数">＋</button>
+                      </div>
+                    </div>
                   </div>
                   <button class="secondary-button detect-compact" id="detectButton" type="button">
-                    <span aria-hidden="true">✦</span> 重新识别
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M5.4 7.3A8 8 0 1 1 4 14.2" />
+                      <path d="M5.4 3.8v3.5h3.5" />
+                    </svg>
+                    重新识别
                   </button>
                 </div>
                 <p class="hint" id="detectHint">上传后将自动推测网格尺寸；手动修改行列数会立即更新图纸。</p>
               </div>
             </div>
 
-            <div class="control-section">
-              <button class="section-title" type="button" aria-expanded="true">
-                <span><em>2</em> 颜色清理</span><i>⌃</i>
-              </button>
+            <div class="control-section" id="cleanupControls" data-control-panel="1">
+              <header class="section-title">
+                <span><em>2</em> 颜色清理</span>
+                <span class="section-swipe-cue" aria-hidden="true">
+                  <i class="swipe-cue-track"></i>
+                  <i class="swipe-cue-dot"></i>
+                </span>
+              </header>
               <div class="section-body">
                 <label class="range-field">
                   <span>去杂色强度 <output id="denoiseValue">标准</output></span>
@@ -165,10 +192,14 @@
               </div>
             </div>
 
-            <div class="control-section palette-section">
-              <button class="section-title" type="button" aria-expanded="true">
-                <span><em>3</em> 调整颜色</span><i>⌃</i>
-              </button>
+            <div class="control-section palette-section" id="paletteControls" data-control-panel="2">
+              <header class="section-title">
+                <span><em>3</em> 调整颜色</span>
+                <span class="section-swipe-cue" aria-hidden="true">
+                  <i class="swipe-cue-track"></i>
+                  <i class="swipe-cue-dot"></i>
+                </span>
+              </header>
               <div class="section-body">
                 <p class="palette-summary" id="paletteSummary">算法识别完成后，可在这里修正图纸颜色和原图匹配关系。</p>
                 <div class="palette-guide" aria-hidden="true">
@@ -182,6 +213,7 @@
                 </div>
                 <p class="hint">点选一项后仍可直接点击图纸中的豆子，进行单格修正。</p>
               </div>
+            </div>
             </div>
           </aside>
 
@@ -210,9 +242,9 @@
                 <canvas
                   id="sourceCanvas"
                   tabindex="0"
-                  aria-label="大图网格校准；框内拖动整个框，框外拖动图片，四个角点调整框选"
+                  aria-label="大图网格校准；框内拖动整个框，框外拖动画布，四个角点调整框选"
                 ></canvas>
-                <div class="editor-tip"><b>框内拖动整个框</b><span>框外拖动图片 · 四个角点调整边界</span></div>
+                <div class="editor-tip"><b>框内拖动整个框</b><span>框外拖动画布 · 四个角点调整边界</span></div>
                 <div class="color-pick-banner" id="colorPickBanner" hidden>
                   <span>
                     <b id="colorPickLabel">正在吸取原图颜色</b>
@@ -272,7 +304,7 @@
         <h2>怎样得到更准确的图纸？</h2>
         <ol>
                   <li><b>先在大图上框边缘。</b>“矩形”模式适合绝大多数图片；只有明显透视时才切到“自由四角”。</li>
-                  <li><b>再看网格和水平。</b>滚轮调整行列数，拖动图片下方的旋转滑杆，让格线穿过每颗豆之间的缝隙。</li>
+                  <li><b>再看网格和水平。</b>滚轮调整行列数，拖动原图下方的旋转滑杆，让格线穿过每颗豆之间的缝隙。</li>
                   <li><b>然后看颜色。</b>实物照片会避开中心孔和反光取色；颜色太多时提高“近似色合并”。</li>
                   <li><b>最后修正。</b>在颜色表改图纸用色和色号，吸取或拖动原图颜色重新匹配；误操作可一键重置。</li>
         </ol>
@@ -335,6 +367,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=31"></script>
+    <script src="./app.js?v=50"></script>
   </body>
 </html>
