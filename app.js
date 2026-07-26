@@ -8,6 +8,10 @@
     hasDocument && typeof window.matchMedia === "function"
       ? window.matchMedia("(max-width: 680px)")
       : { matches: false };
+  const coarsePointerQuery =
+    hasDocument && typeof window.matchMedia === "function"
+      ? window.matchMedia("(pointer: coarse)")
+      : { matches: false };
 
   const elements = {
     hero: $("#hero"),
@@ -143,6 +147,8 @@
     processingToken: 0,
     detectionConfidence: 0,
     mobileControlIndex: 0,
+    exportPngBlob: null,
+    exportPngGeneration: 0,
   };
 
   const labels = {
@@ -2897,15 +2903,71 @@
     }
   }
 
-  function downloadBlob(blob, extension) {
+  function usesMobileSaveFlow() {
+    return mobileLayoutQuery.matches || coarsePointerQuery.matches;
+  }
+
+  function makeExportFile(blob, extension) {
+    const fileName = `${state.fileName || "拼豆图纸"}.${extension}`;
+    const shareType =
+      extension === "json"
+        ? "text/plain"
+        : (blob.type || "application/octet-stream").split(";")[0];
+    return new File([blob], fileName, { type: shareType });
+  }
+
+  function triggerBlobDownload(blob, extension) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `${state.fileName || "拼豆图纸"}.${extension}`;
+    if (usesMobileSaveFlow()) {
+      anchor.target = "_blank";
+      anchor.rel = "noopener";
+    }
+    anchor.style.display = "none";
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(() => URL.revokeObjectURL(url), usesMobileSaveFlow() ? 60000 : 5000);
+  }
+
+  async function saveBlob(blob, extension) {
+    if (
+      usesMobileSaveFlow() &&
+      typeof File === "function" &&
+      typeof navigator.canShare === "function" &&
+      typeof navigator.share === "function"
+    ) {
+      try {
+        const file = makeExportFile(blob, extension);
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: file.name,
+          });
+          return "shared";
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") return "cancelled";
+      }
+    }
+
+    triggerBlobDownload(blob, extension);
+    return usesMobileSaveFlow() ? "fallback" : "downloaded";
+  }
+
+  async function finishBlobExport(blob, extension, label) {
+    const result = await saveBlob(blob, extension);
+    if (result === "cancelled") return;
+    safeCloseModal(elements.exportDialog);
+    if (result === "shared") {
+      showToast(`${label}已交给系统保存 / 分享`);
+    } else if (result === "fallback") {
+      showToast("已请求保存；若打开预览，请从浏览器菜单保存");
+    } else {
+      showToast(`${label}已下载`);
+    }
   }
 
   function makeExportCanvas() {
@@ -2992,17 +3054,42 @@
     return canvas;
   }
 
-  function exportPng() {
-    const canvas = makeExportCanvas();
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        showToast("无法生成 PNG，请尝试减小网格尺寸");
-        return;
+  function preparePngExport() {
+    const button = elements.exportDialog.querySelector('[data-export="png"]');
+    const description = button.querySelector("small");
+    const generation = ++state.exportPngGeneration;
+    state.exportPngBlob = null;
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    description.textContent = "正在生成高清图纸…";
+
+    requestAnimationFrame(() => {
+      try {
+        const canvas = makeExportCanvas();
+        canvas.toBlob((blob) => {
+          if (generation !== state.exportPngGeneration) return;
+          state.exportPngBlob = blob;
+          button.disabled = !blob;
+          button.removeAttribute("aria-busy");
+          description.textContent = blob
+            ? "含网格编号和色号表"
+            : "生成失败，请缩小网格后重试";
+        }, "image/png");
+      } catch {
+        if (generation !== state.exportPngGeneration) return;
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        description.textContent = "生成失败，请缩小网格后重试";
       }
-      downloadBlob(blob, "png");
-      safeCloseModal(elements.exportDialog);
-      showToast("高清图纸已下载");
-    }, "image/png");
+    });
+  }
+
+  function exportPng() {
+    if (!state.exportPngBlob) {
+      showToast("高清图纸仍在生成，请稍候再点");
+      return;
+    }
+    void finishBlobExport(state.exportPngBlob, "png", "高清图纸");
   }
 
   function exportCsv() {
@@ -3023,9 +3110,11 @@
       .forEach((color) =>
         rows.push(`${color.name},${color.code},${rgbToHex(color)},${color.count}`),
       );
-    downloadBlob(new Blob([`\uFEFF${rows.join("\r\n")}`], { type: "text/csv;charset=utf-8" }), "csv");
-    safeCloseModal(elements.exportDialog);
-    showToast("CSV 色号矩阵已下载");
+    void finishBlobExport(
+      new Blob([`\uFEFF${rows.join("\r\n")}`], { type: "text/csv;charset=utf-8" }),
+      "csv",
+      "CSV 色号矩阵",
+    );
   }
 
   function exportJson() {
@@ -3052,12 +3141,11 @@
         }),
       ),
     };
-    downloadBlob(
+    void finishBlobExport(
       new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" }),
       "json",
+      "工程数据",
     );
-    safeCloseModal(elements.exportDialog);
-    showToast("工程数据已下载");
   }
 
   function debounce(fn, delay) {
@@ -3235,7 +3323,9 @@
       safeCloseModal(elements.helpDialog);
     });
     elements.exportButton.addEventListener("click", () => {
-      if (state.cells.length) safeShowModal(elements.exportDialog);
+      if (!state.cells.length) return;
+      safeShowModal(elements.exportDialog);
+      preparePngExport();
     });
     elements.colorEditorClose.addEventListener("click", closeColorEditor);
     elements.colorEditorCancel.addEventListener("click", closeColorEditor);
@@ -3473,8 +3563,11 @@
       else if (type === "csv") exportCsv();
       else if (type === "json") exportJson();
       else if (type === "print") {
-        safeCloseModal(elements.exportDialog);
-        window.print();
+        try {
+          window.print();
+        } finally {
+          safeCloseModal(elements.exportDialog);
+        }
       }
     });
 
@@ -3511,7 +3604,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v51.js").catch(() => {});
+      navigator.serviceWorker.register("./sw-v52.js").catch(() => {});
     }
     window.addEventListener(
       "load",

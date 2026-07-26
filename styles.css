@@ -1910,6 +1910,10 @@ body.editing main {
   gap: 10px;
 }
 
+.export-mobile-note {
+  display: none;
+}
+
 .export-options button {
   display: grid;
   min-height: 125px;
@@ -1919,6 +1923,12 @@ body.editing main {
   background: white;
   cursor: pointer;
   text-align: left;
+}
+
+.export-options button:disabled {
+  opacity: 0.58;
+  cursor: wait;
+  transform: none;
 }
 
 .export-options button:hover {
@@ -2863,6 +2873,19 @@ body.editing main {
     grid-template-columns: 1fr;
   }
 
+  .export-modal {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+  }
+
+  .export-mobile-note {
+    display: block;
+    margin: -13px 0 18px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+
   .export-options button {
     min-height: 94px;
   }
@@ -2921,7 +2944,9 @@ body.editing main {
   .controls,
   .preview-toolbar,
   .statusbar,
-  .live-pattern-preview {
+  .live-pattern-preview,
+  dialog,
+  .toast {
     display: none !important;
   }
 
