@@ -238,7 +238,7 @@
 
   function loadRecognitionCore() {
     if (!recognitionCorePromise) {
-      recognitionCorePromise = import("./recognition/recognition-image-core.mjs?v=63").catch(
+      recognitionCorePromise = import("./recognition/recognition-image-core.mjs?v=64").catch(
         (error) => {
           recognitionCorePromise = null;
           throw error;
@@ -5186,11 +5186,25 @@
     });
   }
 
-  function installLocalRecognitionLabBridge() {
+  function installRecognitionLabBridge() {
     if (!hasDocument) return;
     const parameters = new URLSearchParams(window.location.search);
     const localHost = location.hostname === "127.0.0.1" || location.hostname === "localhost";
-    if (!localHost || !parameters.has("recognitionLab")) return;
+    let sameOriginLab = false;
+    try {
+      const referrer = new URL(document.referrer);
+      sameOriginLab =
+        referrer.origin === location.origin &&
+        referrer.pathname.startsWith("/recognition-lab/");
+    } catch {
+      sameOriginLab = false;
+    }
+    if (
+      !parameters.has("recognitionLab") ||
+      (!localHost && !sameOriginLab)
+    ) {
+      return;
+    }
 
     const decodeImage = (url) =>
       new Promise((resolve, reject) => {
@@ -5260,7 +5274,7 @@
           recognitionSeed,
         });
         return {
-          version: `v63-${state.recognitionEngine}`,
+          version: `v64-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5288,7 +5302,7 @@
   function init() {
     restoreSettings();
     bindEvents();
-    installLocalRecognitionLabBridge();
+    installRecognitionLabBridge();
     syncMobileEditorOrder();
     syncMobileControlCarousel({ align: true });
     updateFrameMode();
@@ -5304,7 +5318,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v63.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v64.js").catch(() => {});
       }
     }
     window.addEventListener(

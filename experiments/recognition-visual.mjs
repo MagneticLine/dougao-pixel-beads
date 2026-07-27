@@ -3,7 +3,7 @@ import {
   drawGridOverlay,
   formatAngle,
   makeAnalysisCanvas,
-} from "../recognition/recognition-image-core.mjs?v=63";
+} from "../recognition/recognition-image-core.mjs?v=64";
 
 const elements = {
   caseList: document.querySelector("#caseList"),

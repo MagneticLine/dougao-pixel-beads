@@ -3,7 +3,7 @@ import {
   measureLatticePointConsensus,
   radians,
   scoreLatticeEvidence,
-} from "./dominant-lattice-core.mjs?v=63";
+} from "./dominant-lattice-core.mjs?v=64";
 
 const HALF_PI = Math.PI / 2;
 const QUARTER_PI = Math.PI / 4;
