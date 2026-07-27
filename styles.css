@@ -50,7 +50,8 @@ button {
 
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+canvas:focus-visible {
   outline: 3px solid rgba(66, 124, 164, 0.35);
   outline-offset: 2px;
 }
@@ -1868,6 +1869,192 @@ body.editing main {
   margin-left: auto;
 }
 
+.crop-dialog {
+  width: min(1080px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 24px);
+  padding: 0;
+  border: 0;
+  border-radius: 22px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 90px rgba(18, 17, 14, 0.34);
+}
+
+.crop-dialog:not([open]) {
+  display: none;
+}
+
+.crop-dialog::backdrop {
+  background: rgba(24, 24, 21, 0.68);
+  backdrop-filter: blur(5px);
+}
+
+.crop-sheet {
+  display: grid;
+  max-height: calc(100dvh - 24px);
+  grid-template-rows: auto auto minmax(260px, 1fr) auto auto;
+}
+
+.crop-head {
+  display: flex;
+  min-width: 0;
+  padding: 22px 24px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.crop-head > span {
+  display: grid;
+  gap: 3px;
+}
+
+.crop-head small {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+}
+
+.crop-head b {
+  font-size: 24px;
+}
+
+.crop-head > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ece9e2;
+  cursor: pointer;
+  font-size: 22px;
+  place-items: center;
+}
+
+.crop-toolbar {
+  display: flex;
+  padding: 0 24px 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.crop-ratios {
+  display: flex;
+  padding: 4px;
+  border-radius: 12px;
+  background: #eeebe4;
+  gap: 3px;
+}
+
+.crop-ratios button,
+.crop-reset,
+.crop-actions > button {
+  min-height: 40px;
+  padding: 0 17px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.crop-ratios button.active {
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(38, 34, 27, 0.11);
+}
+
+.crop-reset {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.crop-workspace {
+  position: relative;
+  display: grid;
+  min-height: 260px;
+  margin: 0 24px;
+  overflow: hidden;
+  border-radius: 15px;
+  background-color: #252723;
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.035) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.035) 75%);
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-size: 20px 20px;
+  place-items: center;
+}
+
+.crop-workspace canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 260px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.crop-workspace canvas.dragging {
+  cursor: grabbing;
+}
+
+.crop-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  color: white;
+  background: rgba(24, 25, 22, 0.75);
+  font-size: 13px;
+  place-items: center;
+}
+
+.crop-info {
+  display: flex;
+  min-width: 0;
+  padding: 12px 24px 4px;
+  color: var(--muted);
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  font-size: 11px;
+}
+
+.crop-info span {
+  color: var(--ink);
+  font-weight: 750;
+}
+
+.crop-actions {
+  display: flex;
+  padding: 14px 24px 22px;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.crop-actions > button {
+  min-width: 92px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.crop-actions > .primary-button {
+  min-width: 126px;
+  border-color: var(--accent);
+  color: white;
+  background: var(--accent);
+}
+
+.crop-actions > button:disabled,
+.crop-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
 .modal {
   width: min(520px, calc(100vw - 32px));
   padding: 0;
@@ -2389,6 +2576,86 @@ body.editing main {
 }
 
 @media (max-width: 680px) {
+  .crop-dialog {
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .crop-sheet {
+    height: 100dvh;
+    max-height: none;
+    grid-template-rows: auto auto minmax(220px, 1fr) auto auto;
+  }
+
+  .crop-head {
+    padding: calc(14px + env(safe-area-inset-top)) 14px 11px;
+  }
+
+  .crop-head b {
+    font-size: 20px;
+  }
+
+  .crop-toolbar {
+    padding: 0 14px 11px;
+    gap: 8px;
+  }
+
+  .crop-ratios {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .crop-ratios button {
+    min-width: 0;
+    padding: 0 10px;
+    flex: 1;
+  }
+
+  .crop-reset {
+    padding: 0 12px;
+    white-space: nowrap;
+  }
+
+  .crop-workspace {
+    min-height: 220px;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .crop-workspace canvas {
+    min-height: 220px;
+  }
+
+  .crop-info {
+    padding: 10px 14px 3px;
+  }
+
+  .crop-info small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .crop-actions {
+    padding: 11px 14px calc(13px + env(safe-area-inset-bottom));
+  }
+
+  .crop-actions > button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 0 13px;
+    flex: 1;
+  }
+
+  .crop-actions > .primary-button {
+    min-width: 0;
+    flex: 1.35;
+  }
+
   body.editing {
     height: auto;
     overflow-x: hidden;

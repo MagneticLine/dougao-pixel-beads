@@ -1,13 +1,13 @@
-const CACHE_NAME = "dougao-v56";
+const CACHE_NAME = "dougao-v57";
 const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
 const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles-v56.css",
-  "./app-v56.js",
-  "./manifest-v56.webmanifest",
+  "./styles-v57.css",
+  "./app-v57.js",
+  "./manifest-v57.webmanifest",
   "./favicon.svg",
   "./og.png",
 ];

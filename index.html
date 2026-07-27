@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v56.webmanifest" />
-    <link rel="stylesheet" href="./styles-v56.css" />
+    <link rel="manifest" href="./manifest-v57.webmanifest" />
+    <link rel="stylesheet" href="./styles-v57.css" />
   </head>
   <body>
     <header class="topbar">
@@ -80,7 +80,7 @@
           <div><span>03</span><b>合并近色</b><small>控制实际采购色数</small></div>
           <div><span>04</span><b>导出图纸</b><small>编号、数量一目了然</small></div>
         </div>
-        <footer class="site-version" aria-label="当前版本">豆稿 <b>v56</b></footer>
+        <footer class="site-version" aria-label="当前版本">豆稿 <b>v57</b></footer>
       </section>
 
       <section class="workspace" id="workspace" hidden>
@@ -300,6 +300,44 @@
       <p>拖动标题栏可在网页内移动 · 松开校准后更新</p>
     </aside>
 
+    <dialog id="cropDialog" class="crop-dialog" aria-labelledby="cropDialogTitle">
+      <form method="dialog" class="crop-sheet">
+        <header class="crop-head">
+          <span>
+            <small>导入前处理</small>
+            <b id="cropDialogTitle">裁剪图片</b>
+          </span>
+          <button id="cropClose" type="button" aria-label="取消裁剪">×</button>
+        </header>
+        <div class="crop-toolbar" aria-label="裁剪比例">
+          <div class="crop-ratios" role="group" aria-label="选择裁剪比例">
+            <button class="active" type="button" data-crop-ratio="free" aria-pressed="true">自由</button>
+            <button type="button" data-crop-ratio="1">1 : 1</button>
+            <button type="button" data-crop-ratio="1.3333333333">4 : 3</button>
+            <button type="button" data-crop-ratio="0.75">3 : 4</button>
+          </div>
+          <button id="cropReset" class="crop-reset" type="button">重置选区</button>
+        </div>
+        <div class="crop-workspace">
+          <canvas
+            id="cropCanvas"
+            tabindex="0"
+            aria-label="裁剪预览；拖动选区移动，拖动四角调整范围"
+          ></canvas>
+          <div class="crop-loading" id="cropLoading" hidden>正在读取图片…</div>
+        </div>
+        <div class="crop-info">
+          <span id="cropSize">—</span>
+          <small>拖动选区移动 · 拖动四角调整范围</small>
+        </div>
+        <footer class="crop-actions">
+          <button id="cropCancel" type="button">取消</button>
+          <button id="cropUseOriginal" type="button">使用原图</button>
+          <button id="cropApply" class="primary-button" type="button">应用裁剪</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="helpDialog" class="modal">
       <form method="dialog">
         <button class="modal-close" aria-label="关闭">×</button>
@@ -391,6 +429,6 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v56.js"></script>
+    <script src="./app-v57.js"></script>
   </body>
 </html>
