@@ -1,0 +1,61 @@
+{
+  "targetCoverageMinimum": 0.5,
+  "analysisMaxSide": 560,
+  "cases": [
+    {
+      "file": "../tests/fixtures/recognition/4ec37b0487284aa97d5287be969e3c47.jpg",
+      "label": "simple-pixel-art",
+      "crop": { "left": 90, "top": 55, "width": 500, "height": 640 },
+      "expectedGrid": { "cols": 17, "rows": 25 },
+      "review": {
+        "verdict": "旧算法略准，新算法可用",
+        "referenceLattice": { "period": 19, "angle": 0 },
+        "note": "新算法候选 1 的基本晶格正确，横向相位有轻微偏移；主体黄框不正确。"
+      }
+    },
+    {
+      "file": "../tests/fixtures/recognition/v2-e2734e283d17f84293b4188c5e1842ba_r.jpg",
+      "label": "pixel-art-with-background",
+      "crop": { "left": 220, "top": 205, "width": 280, "height": 240 },
+      "expectedGrid": null,
+      "review": {
+        "verdict": "新算法可用",
+        "referenceLattice": { "period": 8, "angle": 0 },
+        "note": "旧算法完全不可用；新算法候选 1 正确，但行数可能少了一行，主体黄框不正确。"
+      }
+    },
+    {
+      "file": "../tests/fixtures/recognition/9ee523f8fecd4097ab6c9bae7b664121.jpg",
+      "label": "fused-beads",
+      "crop": { "left": 240, "top": 620, "width": 720, "height": 680 },
+      "expectedGrid": null,
+      "review": {
+        "verdict": "新旧算法都不可用",
+        "referenceLattice": { "period": 15.5, "angle": 4 },
+        "note": "旧版新算法候选 2 和 4 的方向、边缘较贴合，但属于真实单格的倍频；主体黄框不正确。"
+      }
+    },
+    {
+      "file": "../tests/fixtures/recognition/467546592_18101250943456758_3079173382637406535_n.jpg",
+      "label": "beads-with-holes",
+      "crop": { "left": 350, "top": 470, "width": 660, "height": 610 },
+      "expectedGrid": { "cols": 15, "rows": 14 },
+      "review": {
+        "verdict": "新算法正确",
+        "referenceLattice": { "period": 28.3, "angle": 9 },
+        "note": "旧算法完全不可用；新算法候选 1 的晶格和主体黄框均正确。"
+      }
+    },
+    {
+      "file": "../tests/fixtures/recognition/C31D783E21EAB9E5C73DF173EB457651.jpg",
+      "label": "labeled-chart",
+      "crop": { "left": 20, "top": 65, "width": 1217, "height": 1500 },
+      "expectedGrid": { "cols": 29, "rows": 34 },
+      "review": {
+        "verdict": "新算法候选 2 正确",
+        "referenceLattice": { "period": 15, "angle": 0 },
+        "note": "旧算法不可用；新算法候选 2 的晶格正确，但位置仍需微调，主体黄框不正确。"
+      }
+    }
+  ]
+}

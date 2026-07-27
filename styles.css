@@ -179,6 +179,9 @@ body.editing main {
   position: absolute;
   right: clamp(24px, 5vw, 84px);
   bottom: 13px;
+  display: flex;
+  gap: 9px;
+  align-items: center;
   color: #aaa398;
   font-size: 9px;
   font-weight: 700;
@@ -188,6 +191,24 @@ body.editing main {
 .site-version b {
   color: #777168;
   font-weight: 850;
+}
+
+.site-version a {
+  color: #777168;
+  text-decoration: none;
+}
+
+.site-version a::before {
+  margin-right: 9px;
+  color: #c6c0b6;
+  content: "·";
+}
+
+.site-version a:hover,
+.site-version a:focus-visible {
+  color: var(--accent-dark);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .hero-copy {
@@ -1995,6 +2016,50 @@ body.editing main {
 
 .crop-workspace canvas.dragging {
   cursor: grabbing;
+}
+
+.crop-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 25px;
+  height: 25px;
+  opacity: 0;
+  pointer-events: none;
+  mix-blend-mode: difference;
+  transform: translate3d(-100px, -100px, 0);
+}
+
+.crop-cursor::before,
+.crop-cursor::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  background: #fff;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.crop-cursor::before {
+  width: 1px;
+  height: 25px;
+}
+
+.crop-cursor::after {
+  width: 25px;
+  height: 1px;
+}
+
+.crop-cursor.visible {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .crop-workspace canvas:not(.dragging) {
+    cursor: none;
+  }
 }
 
 .crop-loading {

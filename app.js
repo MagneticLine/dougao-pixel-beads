@@ -31,7 +31,9 @@
     clipboardMeta: $("#clipboardMeta"),
     clipboardButton: $("#clipboardButton"),
     cropDialog: $("#cropDialog"),
+    cropWorkspace: $(".crop-workspace"),
     cropCanvas: $("#cropCanvas"),
+    cropCursor: $("#cropCursor"),
     cropLoading: $("#cropLoading"),
     cropSize: $("#cropSize"),
     cropClose: $("#cropClose"),
@@ -141,6 +143,7 @@
     sourceView: null,
     sourcePan: { x: 0, y: 0 },
     sourcePixelCache: null,
+    recognitionSeed: null,
     clipboardFile: null,
     clipboardUrl: "",
     pendingCrop: null,
@@ -178,6 +181,7 @@
     future: [],
     processingToken: 0,
     detectionConfidence: 0,
+    recognitionEngine: "legacy",
     mobileControlIndex: 0,
     exportPngBlob: null,
     exportPngGeneration: 0,
@@ -191,6 +195,7 @@
     merge: ["关闭", "轻微", "适中", "明显", "强力"],
   };
   let mobileControlResizeObserver = null;
+  let recognitionCorePromise = null;
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -214,6 +219,33 @@
       x: (cosine * dx + sine * dy) / width + 0.5,
       y: (-sine * dx + cosine * dy) / height + 0.5,
     };
+  }
+
+  function sourcePointToView(point) {
+    if (!state.image) return point;
+    const radians = (state.rotation * Math.PI) / 180;
+    const cosine = Math.cos(radians);
+    const sine = Math.sin(radians);
+    const width = state.image.naturalWidth;
+    const height = state.image.naturalHeight;
+    const dx = (point.x - 0.5) * width;
+    const dy = (point.y - 0.5) * height;
+    return {
+      x: (cosine * dx - sine * dy) / width + 0.5,
+      y: (sine * dx + cosine * dy) / height + 0.5,
+    };
+  }
+
+  function loadRecognitionCore() {
+    if (!recognitionCorePromise) {
+      recognitionCorePromise = import("./recognition/recognition-image-core.mjs?v=63").catch(
+        (error) => {
+          recognitionCorePromise = null;
+          throw error;
+        },
+      );
+    }
+    return recognitionCorePromise;
   }
 
   function showToast(message) {
@@ -659,6 +691,38 @@
     };
   }
 
+  function hideCropCursor() {
+    elements.cropCursor.classList.remove("visible");
+  }
+
+  function updateCropCursor(event) {
+    if (
+      !state.pendingCrop ||
+      state.cropApplying ||
+      state.cropDrag ||
+      coarsePointerQuery.matches ||
+      event.pointerType === "touch"
+    ) {
+      hideCropCursor();
+      return;
+    }
+    const canvasBounds = elements.cropCanvas.getBoundingClientRect();
+    const workspaceBounds = elements.cropWorkspace.getBoundingClientRect();
+    if (
+      event.clientX < canvasBounds.left ||
+      event.clientX > canvasBounds.right ||
+      event.clientY < canvasBounds.top ||
+      event.clientY > canvasBounds.bottom
+    ) {
+      hideCropCursor();
+      return;
+    }
+    const x = event.clientX - workspaceBounds.left;
+    const y = event.clientY - workspaceBounds.top;
+    elements.cropCursor.style.transform = `translate3d(${x - 12.5}px, ${y - 12.5}px, 0)`;
+    elements.cropCursor.classList.add("visible");
+  }
+
   function updateCropSize() {
     if (!state.pendingCrop) {
       elements.cropSize.textContent = "—";
@@ -816,6 +880,7 @@
     };
     elements.cropCanvas.setPointerCapture(event.pointerId);
     elements.cropCanvas.classList.add("dragging");
+    hideCropCursor();
     event.preventDefault();
   }
 
@@ -872,7 +937,12 @@
 
   function moveCropPointer(event) {
     const drag = state.cropDrag;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag) {
+      updateCropCursor(event);
+      return;
+    }
+    if (drag.pointerId !== event.pointerId) return;
+    hideCropCursor();
     const point = cropPointerPosition(event);
     if (!point) return;
     if (drag.type === "move") {
@@ -904,6 +974,7 @@
     if (elements.cropCanvas.hasPointerCapture(event.pointerId)) {
       elements.cropCanvas.releasePointerCapture(event.pointerId);
     }
+    updateCropCursor(event);
   }
 
   function discardPendingCrop() {
@@ -911,6 +982,7 @@
     state.pendingCrop = null;
     state.cropDrag = null;
     state.cropView = null;
+    hideCropCursor();
     setCropBusy(false);
   }
 
@@ -955,6 +1027,37 @@
         quality,
       );
     });
+  }
+
+  function makeRecognitionSeed(source, crop = null, maximumSide = 560) {
+    const sourceWidth = crop?.width || source.naturalWidth || source.width;
+    const sourceHeight = crop?.height || source.naturalHeight || source.height;
+    const scale = Math.min(
+      1,
+      maximumSide / Math.max(sourceWidth, sourceHeight),
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(2, Math.round(sourceHeight * scale));
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      source,
+      crop?.left || 0,
+      crop?.top || 0,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    );
+    return {
+      width: canvas.width,
+      height: canvas.height,
+      imageData: context.getImageData(0, 0, canvas.width, canvas.height),
+    };
   }
 
   async function applyCrop() {
@@ -1010,6 +1113,12 @@
         outputWidth,
         outputHeight,
       );
+      const recognitionSeed = makeRecognitionSeed(image, {
+        left: sourceX,
+        top: sourceY,
+        width: sourceWidth,
+        height: sourceHeight,
+      });
 
       const originalType = pending.file.type;
       const outputType =
@@ -1029,7 +1138,11 @@
       safeCloseModal(elements.cropDialog);
       URL.revokeObjectURL(pending.url);
       if (scale < 1) showToast("原图尺寸很大，已在保持清晰的前提下安全缩放");
-      await loadFile(croppedFile, { skipCrop: true, bypassSizeLimit: true });
+      await loadFile(croppedFile, {
+        skipCrop: true,
+        bypassSizeLimit: true,
+        recognitionSeed,
+      });
     } catch (error) {
       console.error(error);
       showToast("裁剪失败，请尝试缩小选区或直接使用原图");
@@ -1037,7 +1150,12 @@
     }
   }
 
-  async function activateLoadedImage(file, image, url) {
+  async function activateLoadedImage(
+    file,
+    image,
+    url,
+    { detectionEngine = "auto", recognitionSeed = null } = {},
+  ) {
     if (image.naturalWidth < 2 || image.naturalHeight < 2) {
       URL.revokeObjectURL(url);
       showToast("图片尺寸太小，无法识别网格");
@@ -1056,6 +1174,7 @@
     state.sourcePan = { x: 0, y: 0 };
     state.view = "source";
     state.sourcePixelCache = null;
+    state.recognitionSeed = recognitionSeed;
     state.detectedMode = detectImageKind();
     suggestPhotoFrame();
     state.palette = [];
@@ -1088,10 +1207,17 @@
     syncMobileControlCarousel({ align: true });
     drawSourceThumb();
     window.scrollTo({ top: 0, behavior: "smooth" });
-    await autoDetect(true);
+    await autoDetect(true, { engine: detectionEngine });
   }
 
-  async function loadFile(file, { skipCrop = false, bypassSizeLimit = false } = {}) {
+  async function loadFile(
+    file,
+    {
+      skipCrop = false,
+      bypassSizeLimit = false,
+      recognitionSeed = null,
+    } = {},
+  ) {
     if (!file || !file.type.startsWith("image/")) {
       showToast("请选择 PNG、JPG、WebP、GIF 或 BMP 图片");
       return;
@@ -1105,7 +1231,7 @@
     const image = new Image();
     image.decoding = "async";
     image.onload = () => {
-      if (skipCrop) void activateLoadedImage(file, image, url);
+      if (skipCrop) void activateLoadedImage(file, image, url, { recognitionSeed });
       else openCropDialog({ file, image, url });
     };
     image.onerror = () => {
@@ -2180,7 +2306,131 @@
     }
   }
 
-  async function autoDetect(isInitial = false) {
+  function normalizeHybridFrame(candidate, canvas) {
+    const corners = candidate?.frame?.corners;
+    if (!Array.isArray(corners) || corners.length !== 4) return null;
+    const sourceFrame = corners.map((point) => ({
+      x: Number(point.x) / canvas.width,
+      y: Number(point.y) / canvas.height,
+    }));
+    if (
+      sourceFrame.some(
+        (point) =>
+          !Number.isFinite(point.x) ||
+          !Number.isFinite(point.y) ||
+          point.x < -0.14 ||
+          point.x > 1.14 ||
+          point.y < -0.14 ||
+          point.y > 1.14,
+      )
+    ) {
+      return null;
+    }
+    const frame = sourceFrame
+      .map((point) => ({
+        x: clamp(point.x, 0, 1),
+        y: clamp(point.y, 0, 1),
+      }))
+      .map(sourcePointToView)
+      .map((point) => ({
+        x: clamp(point.x, 0, 1),
+        y: clamp(point.y, 0, 1),
+      }));
+    if (!frameIsConvex(frame) || Math.abs(framePolygonArea(frame)) < 0.16) return null;
+    return frame;
+  }
+
+  async function analyzeWithHybridRecognition() {
+    const recognition = await loadRecognitionCore();
+    const maximumSide = 560;
+    const prepared = state.recognitionSeed
+      ? {
+          canvas: {
+            width: state.recognitionSeed.width,
+            height: state.recognitionSeed.height,
+          },
+          imageData: state.recognitionSeed.imageData,
+        }
+      : recognition.makeAnalysisCanvas(
+          state.image,
+          {
+            left: 0,
+            top: 0,
+            width: state.image.naturalWidth,
+            height: state.image.naturalHeight,
+          },
+          maximumSide,
+        );
+    const result = await recognition.analyzeHybridLattice(prepared.imageData, {
+      maximumPoints: 1650,
+      maximumResults: 5,
+    });
+    let selected = null;
+    for (let index = 0; index < (result.candidates?.length || 0); index += 1) {
+      const candidate = result.candidates[index];
+      const frame = normalizeHybridFrame(candidate, prepared.canvas);
+      if (!frame) continue;
+      selected = { candidate, frame, index };
+      break;
+    }
+    const candidate = selected?.candidate;
+    const frame = selected?.frame;
+    const cols = Math.round(Number(candidate?.frame?.cols));
+    const rows = Math.round(Number(candidate?.frame?.rows));
+    const confidence = clamp(
+      (Number(result.confidence) || 0) * (selected?.index ? 0.82 : 1),
+      0,
+      1,
+    );
+    if (
+      !frame ||
+      !Number.isFinite(cols) ||
+      !Number.isFinite(rows) ||
+      cols < 2 ||
+      cols > 200 ||
+      rows < 2 ||
+      rows > 200 ||
+      confidence < 0.3
+    ) {
+      return null;
+    }
+    return {
+      cols,
+      rows,
+      frame,
+      confidence,
+      candidate,
+      candidateIndex: selected.index,
+      elapsedMs: result.elapsedMs,
+    };
+  }
+
+  function applyHybridDetection(detection) {
+    state.cols = detection.cols;
+    state.rows = detection.rows;
+    state.frame = detection.frame;
+    state.frameMode =
+      Math.abs(Number(detection.candidate.angle) || 0) > Math.PI / 360
+        ? "free"
+        : "rect";
+    state.detectionConfidence = detection.confidence;
+    state.recognitionEngine = "hybrid";
+    syncCropFromFrame();
+    updateFrameMode();
+  }
+
+  function applyLegacyDetection() {
+    const photoMode = activeSourceMode() === "photo";
+    const analysis = analyzeGridCanvas(makeAnalysisCanvas(), photoMode);
+    applyDetectedGrid(analysis);
+    const frameAligned = alignFrameToDetectedGrid(analysis, state.cols, state.rows);
+    state.detectionConfidence =
+      (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
+    state.recognitionEngine = "legacy";
+    return { analysis, frameAligned };
+  }
+
+  async function autoDetect(isInitial = false, { engine = "auto" } = {}) {
     if (!state.image) return;
     readCrop();
     const token = ++state.processingToken;
@@ -2189,11 +2439,23 @@
     await sleepFrame();
 
     try {
-      const photoMode = activeSourceMode() === "photo";
-      const analysis = analyzeGridCanvas(makeAnalysisCanvas(), photoMode);
+      let hybridDetection = null;
+      if (engine !== "legacy") {
+        try {
+          hybridDetection = await analyzeWithHybridRecognition();
+        } catch (error) {
+          console.warn("Hybrid recognition unavailable; using legacy fallback.", error);
+        }
+      }
       if (token !== state.processingToken) return;
-      applyDetectedGrid(analysis);
-      const frameAligned = alignFrameToDetectedGrid(analysis, state.cols, state.rows);
+      let frameAligned = false;
+      if (hybridDetection) {
+        applyHybridDetection(hybridDetection);
+        frameAligned = true;
+      } else {
+        ({ frameAligned } = applyLegacyDetection());
+      }
+      if (token !== state.processingToken) return;
       if (frameAligned) {
         drawSourceThumb();
         await sleepFrame();
@@ -2201,14 +2463,13 @@
       }
       fitSourceFrameToViewport(0.8);
 
-      state.detectionConfidence =
-        (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
+      elements.workspace.dataset.recognitionEngine = state.recognitionEngine;
       elements.gridCols.value = state.cols;
       elements.gridRows.value = state.rows;
       elements.detectHint.textContent =
         state.detectionConfidence > 0.7
           ? frameAligned
-            ? "已根据格线同时校正框选与行列数；手动修改会立即更新图纸。"
+            ? "已根据多种网格证据同时校正框选与行列数；手动修改会立即更新图纸。"
             : "行列数与框选已检查；手动修改会立即更新图纸。"
           : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
@@ -4581,6 +4842,8 @@
     elements.cropCanvas.addEventListener("pointermove", moveCropPointer);
     elements.cropCanvas.addEventListener("pointerup", finishCropPointer);
     elements.cropCanvas.addEventListener("pointercancel", finishCropPointer);
+    elements.cropCanvas.addEventListener("pointerenter", updateCropCursor);
+    elements.cropCanvas.addEventListener("pointerleave", hideCropCursor);
     elements.cropCanvas.addEventListener("keydown", (event) => {
       if (!state.pendingCrop || state.cropApplying) return;
       if (event.key === "Enter") {
@@ -4909,6 +5172,7 @@
       }, 120),
     );
     window.addEventListener("focus", detectGrantedClipboardImage);
+    window.addEventListener("blur", hideCropCursor);
     window.addEventListener("keydown", (event) => {
       const modifier = event.ctrlKey || event.metaKey;
       if (!modifier || elements.workspace.hidden) return;
@@ -4922,15 +5186,126 @@
     });
   }
 
+  function installLocalRecognitionLabBridge() {
+    if (!hasDocument) return;
+    const parameters = new URLSearchParams(window.location.search);
+    const localHost = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+    if (!localHost || !parameters.has("recognitionLab")) return;
+
+    const decodeImage = (url) =>
+      new Promise((resolve, reject) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error(`Unable to decode fixture: ${url}`));
+        image.src = url;
+      });
+
+    const analyzeFixture = async ({
+      url,
+      crop,
+      label = "fixture",
+      engine = "auto",
+    }) => {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Unable to load fixture: ${response.status}`);
+      const sourceBlob = await response.blob();
+      const sourceUrl = URL.createObjectURL(sourceBlob);
+      let sourceImage;
+      try {
+        sourceImage = await decodeImage(sourceUrl);
+      } finally {
+        URL.revokeObjectURL(sourceUrl);
+      }
+
+      const left = clamp(Math.round(Number(crop?.left) || 0), 0, sourceImage.naturalWidth - 1);
+      const top = clamp(Math.round(Number(crop?.top) || 0), 0, sourceImage.naturalHeight - 1);
+      const width = clamp(
+        Math.round(Number(crop?.width) || sourceImage.naturalWidth),
+        2,
+        sourceImage.naturalWidth - left,
+      );
+      const height = clamp(
+        Math.round(Number(crop?.height) || sourceImage.naturalHeight),
+        2,
+        sourceImage.naturalHeight - top,
+      );
+      const scale = Math.min(1, 8192 / width, 8192 / height, Math.sqrt(32000000 / (width * height)));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(2, Math.round(width * scale));
+      canvas.height = Math.max(2, Math.round(height * scale));
+      const context = canvas.getContext("2d");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(sourceImage, left, top, width, height, 0, 0, canvas.width, canvas.height);
+      const recognitionSeed = makeRecognitionSeed(sourceImage, {
+        left,
+        top,
+        width,
+        height,
+      });
+      const type = sourceBlob.type === "image/webp" ? "image/webp" : "image/jpeg";
+      const croppedBlob = await canvasToBlob(canvas, type, 0.95);
+      const file = new File([croppedBlob], `${label}.jpg`, {
+        type,
+        lastModified: Date.now(),
+      });
+      const croppedUrl = URL.createObjectURL(file);
+      const croppedImage = await decodeImage(croppedUrl);
+      const previousMode = elements.sourceMode.value;
+      elements.sourceMode.value = "auto";
+      try {
+        await activateLoadedImage(file, croppedImage, croppedUrl, {
+          detectionEngine: engine,
+          recognitionSeed,
+        });
+        return {
+          version: `v63-${state.recognitionEngine}`,
+          engine: state.recognitionEngine,
+          mode: state.detectedMode,
+          cols: state.cols,
+          rows: state.rows,
+          confidence: state.detectionConfidence,
+          frame: state.frame.map((point) => ({ x: point.x, y: point.y })),
+          hint: elements.detectHint.textContent,
+          width: croppedImage.naturalWidth,
+          height: croppedImage.naturalHeight,
+        };
+      } finally {
+        elements.sourceMode.value = previousMode;
+      }
+    };
+
+    let analysisQueue = Promise.resolve();
+    window.__pixelRefineRecognitionLab = Object.freeze({
+      analyzeFixture(options) {
+        analysisQueue = analysisQueue.then(() => analyzeFixture(options));
+        return analysisQueue;
+      },
+    });
+  }
+
   function init() {
     restoreSettings();
     bindEvents();
+    installLocalRecognitionLabBridge();
     syncMobileEditorOrder();
     syncMobileControlCarousel({ align: true });
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v60.js").catch(() => {});
+      const localDevelopment =
+        location.hostname === "127.0.0.1" || location.hostname === "localhost";
+      if (localDevelopment) {
+        navigator.serviceWorker
+          .getRegistrations()
+          .then((registrations) =>
+            Promise.all(registrations.map((registration) => registration.unregister())),
+          )
+          .catch(() => {});
+      } else {
+        navigator.serviceWorker.register("./sw-v63.js").catch(() => {});
+      }
     }
     window.addEventListener(
       "load",

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网格识别人工拟合实验</title>
+    <link rel="stylesheet" href="./recognition-visual.css?lab=17" />
+  </head>
+  <body>
+    <header class="lab-header">
+      <div>
+        <a class="home-link" href="../">← 返回豆稿</a>
+        <p class="eyebrow">豆稿 · 本地实验工具</p>
+        <h1>旧算法 / 主导晶格算法拟合对照</h1>
+        <p class="intro">
+          五张图片使用同一组预设裁剪。白色细线表示算法推测的无限晶格，黄色虚线表示算法推测的主体边界。
+          新算法会保留五个候选，请人工检查格距、方向、相位和边界是否真正落在豆格上。
+        </p>
+      </div>
+      <div class="assumption">
+        <span>实验前提</span>
+        <strong>裁剪后主体外接区域 &gt; 50%</strong>
+        <small>这是软先验，不是达不到就强制失败的硬门槛。</small>
+      </div>
+    </header>
+
+    <section class="lab-toolbar" aria-label="实验控制">
+      <div class="toolbar-group">
+        <label for="lineOpacity">网格可见度</label>
+        <input id="lineOpacity" type="range" min="25" max="100" value="82" />
+        <output id="lineOpacityValue">82%</output>
+      </div>
+      <label class="check-control">
+        <input id="showFrame" type="checkbox" checked />
+        显示主体边界
+      </label>
+      <button id="rerunAll" type="button">重新运行全部</button>
+      <button id="copySummary" type="button" class="secondary">复制结果摘要</button>
+      <button id="exportGroundTruth" type="button" class="secondary" disabled>
+        导出人工基准
+      </button>
+      <label class="import-control">
+        导入标注包
+        <input id="importGroundTruth" type="file" accept="application/json,.json" />
+      </label>
+      <p id="globalStatus" class="global-status" role="status">正在准备实验环境…</p>
+    </section>
+
+    <aside class="reading-guide">
+      <strong>怎么判断：</strong>
+      先看每根细线是否穿过真实格子边界，再看黄色边界是否包住完整主体，最后核对行列数。
+      黄色虚线不是裁剪框，而是算法根据逐格证据推测的主体行列范围。
+      新算法分数只用于候选排序，不代表它一定正确；如果第二、第三候选更贴合，请直接选中它再观察。
+    </aside>
+
+    <main id="caseList" class="case-list" aria-live="polite"></main>
+
+    <dialog id="zoomDialog" class="zoom-dialog">
+      <div class="zoom-header">
+        <div>
+          <p id="zoomEyebrow" class="eyebrow"></p>
+          <h2 id="zoomTitle">放大检查</h2>
+        </div>
+        <button id="zoomClose" type="button" class="icon-button" aria-label="关闭">×</button>
+      </div>
+      <div class="zoom-stage">
+        <canvas id="zoomCanvas"></canvas>
+      </div>
+      <p id="zoomMeta" class="zoom-meta"></p>
+    </dialog>
+
+    <dialog id="truthDialog" class="truth-dialog">
+      <div class="truth-header">
+        <div>
+          <p id="truthEyebrow" class="eyebrow">人工验证集</p>
+          <h2 id="truthTitle">标注正确网格</h2>
+          <p id="truthSubtitle"></p>
+        </div>
+        <button id="truthClose" type="button" class="icon-button" aria-label="关闭">
+          ×
+        </button>
+      </div>
+      <div class="truth-layout">
+        <section class="truth-workspace">
+          <div id="truthStage" class="truth-stage">
+            <canvas id="truthCanvas"></canvas>
+            <canvas
+              id="truthMagnifier"
+              class="truth-magnifier"
+              width="156"
+              height="156"
+              hidden
+            ></canvas>
+          </div>
+          <p class="truth-help">
+            拖动四个圆点对准最外层网格交点；框内拖动可整体平移。白色细线只用于校准，不会写入图片。
+          </p>
+        </section>
+        <aside class="truth-controls">
+          <div class="truth-field-grid">
+            <label>
+              <span>列数</span>
+              <div class="truth-stepper">
+                <button type="button" data-truth-step="cols" data-delta="-1">−</button>
+                <input id="truthCols" type="number" min="2" max="200" inputmode="numeric" />
+                <button type="button" data-truth-step="cols" data-delta="1">＋</button>
+              </div>
+            </label>
+            <label>
+              <span>行数</span>
+              <div class="truth-stepper">
+                <button type="button" data-truth-step="rows" data-delta="-1">−</button>
+                <input id="truthRows" type="number" min="2" max="200" inputmode="numeric" />
+                <button type="button" data-truth-step="rows" data-delta="1">＋</button>
+              </div>
+            </label>
+          </div>
+          <label class="truth-note-field">
+            <span>备注（可选）</span>
+            <textarea
+              id="truthNote"
+              rows="4"
+              placeholder="例如：底边有一行被反光遮挡，但仍确认存在。"
+            ></textarea>
+          </label>
+          <div class="truth-data-note">
+            <strong>导出的是什么？</strong>
+            <p>
+              JSON 只包含图片指纹、裁剪参数、行列数和四角坐标；不会把原图或裁剪图写入数据包。
+            </p>
+          </div>
+          <p id="truthStatus" class="truth-status" role="status"></p>
+          <div class="truth-actions">
+            <button id="truthReset" type="button" class="secondary">
+              重置为自动结果
+            </button>
+            <button id="truthClear" type="button" class="danger">删除本例标注</button>
+            <button id="truthSave" type="button">保存本例</button>
+          </div>
+        </aside>
+      </div>
+    </dialog>
+
+    <iframe
+      id="legacyRunner"
+      class="legacy-runner"
+      src="../index.html?recognitionLab=1"
+      title="当前算法本地运行器"
+      aria-hidden="true"
+    ></iframe>
+
+    <template id="caseTemplate">
+      <article class="case-card">
+        <header class="case-header">
+          <div>
+            <p class="case-number"></p>
+            <h2 class="case-title"></h2>
+            <p class="case-description"></p>
+          </div>
+          <div class="case-actions">
+            <button type="button" class="truth-open">标注人工解</button>
+            <div class="case-state">
+              <span class="state-dot"></span>
+              <span class="state-text">等待运行</span>
+            </div>
+          </div>
+        </header>
+
+        <div class="comparison-grid">
+          <section class="result-pane source-result">
+            <div class="pane-heading">
+              <div>
+                <span class="method-tag neutral">输入</span>
+                <h3>预设裁剪</h3>
+              </div>
+              <p class="source-meta"></p>
+            </div>
+            <button type="button" class="canvas-button" data-zoom="source">
+              <canvas class="source-canvas"></canvas>
+              <span class="zoom-hint">点击放大</span>
+            </button>
+            <p class="pane-note">这里就是交给两种算法的同一张裁剪图。</p>
+          </section>
+
+          <section class="result-pane legacy-result">
+            <div class="pane-heading">
+              <div>
+                <span class="method-tag legacy">旧</span>
+                <h3>当前网页算法</h3>
+              </div>
+              <p class="legacy-meta">等待运行</p>
+            </div>
+            <button type="button" class="canvas-button" data-zoom="legacy">
+              <canvas class="legacy-canvas"></canvas>
+              <span class="zoom-hint">点击放大</span>
+            </button>
+            <p class="legacy-detail pane-note"></p>
+          </section>
+
+          <section class="result-pane hybrid-result">
+            <div class="pane-heading">
+              <div>
+                <span class="method-tag hybrid">新</span>
+                <h3>主导晶格候选</h3>
+              </div>
+              <p class="hybrid-meta">等待运行</p>
+            </div>
+            <button type="button" class="canvas-button" data-zoom="hybrid">
+              <canvas class="hybrid-canvas"></canvas>
+              <span class="zoom-hint">点击放大</span>
+            </button>
+            <div class="candidate-switcher" aria-label="新算法候选"></div>
+          </section>
+        </div>
+
+        <div class="evidence-panel">
+          <div class="evidence-heading">
+            <div>
+              <span>当前新算法候选的证据</span>
+              <strong class="candidate-title">尚未生成</strong>
+            </div>
+            <p class="expected-grid"></p>
+          </div>
+          <p class="review-note" hidden></p>
+          <div class="evidence-bars">
+            <div class="evidence-item" data-metric="siteOccupancy">
+              <span>格点占用</span><i><b></b></i><output>—</output>
+            </div>
+            <div class="evidence-item" data-metric="cellDominance">
+              <span>格内主色</span><i><b></b></i><output>—</output>
+            </div>
+            <div class="evidence-item" data-metric="lineContinuity">
+              <span>连续格线</span><i><b></b></i><output>—</output>
+            </div>
+            <div class="evidence-item" data-metric="centerEvidence">
+              <span>中心结构</span><i><b></b></i><output>—</output>
+            </div>
+            <div class="evidence-item" data-metric="coveragePrior">
+              <span>主体覆盖</span><i><b></b></i><output>—</output>
+            </div>
+          </div>
+          <div class="manual-verdict" role="group" aria-label="人工判断">
+            <span>你的判断</span>
+            <button type="button" data-verdict="legacy">旧算法更准</button>
+            <button type="button" data-verdict="hybrid">新算法更准</button>
+            <button type="button" data-verdict="both">都能用</button>
+            <button type="button" data-verdict="neither">都不准</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script type="module" src="./recognition-visual.mjs?lab=17"></script>
+  </body>
+</html>

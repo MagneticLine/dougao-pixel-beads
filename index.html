@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v60.webmanifest" />
-    <link rel="stylesheet" href="./styles-v60.css" />
+    <link rel="manifest" href="./manifest-v63.webmanifest" />
+    <link rel="stylesheet" href="./styles-v63.css" />
   </head>
   <body>
     <header class="topbar">
@@ -80,7 +80,10 @@
           <div><span>03</span><b>合并近色</b><small>控制实际采购色数</small></div>
           <div><span>04</span><b>导出图纸</b><small>编号、数量一目了然</small></div>
         </div>
-        <footer class="site-version" aria-label="当前版本">豆稿 <b>v60</b></footer>
+        <footer class="site-version" aria-label="当前版本">
+          豆稿 <b>v63</b>
+          <a href="./recognition-lab/index.html">识别实验室</a>
+        </footer>
       </section>
 
       <section class="workspace" id="workspace" hidden>
@@ -329,6 +332,7 @@
             tabindex="0"
             aria-label="裁剪预览；拖动选区移动，拖动四角调整范围"
           ></canvas>
+          <span id="cropCursor" class="crop-cursor" aria-hidden="true"></span>
           <div class="crop-loading" id="cropLoading" hidden>正在读取图片…</div>
         </div>
         <div class="crop-info">
@@ -434,6 +438,6 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v60.js"></script>
+    <script src="./app-v63.js"></script>
   </body>
 </html>
