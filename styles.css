@@ -1509,35 +1509,29 @@ body.editing main {
   outline-offset: -3px;
 }
 
-.editor-tip {
+.source-editor .corner-magnifier {
   position: absolute;
-  z-index: 2;
-  top: 12px;
-  left: 12px;
-  display: flex;
-  max-width: calc(100% - 24px);
-  padding: 8px 11px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 10px;
-  color: white;
-  background: rgba(22, 25, 22, 0.68);
-  backdrop-filter: blur(8px);
-  gap: 8px;
-  font-size: 10px;
+  z-index: 4;
+  display: block;
+  width: 108px;
+  height: 108px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  clip-path: circle(50%);
+  image-rendering: auto;
   pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
-.editor-tip span {
-  opacity: 0.72;
+.source-editor .corner-magnifier[hidden] {
+  display: none;
 }
 
 .source-editor.color-picking #sourceCanvas,
 .source-editor.color-picking #sourceCanvas:active {
   cursor: crosshair;
-}
-
-.source-editor.color-picking .editor-tip {
-  display: none;
 }
 
 .color-pick-banner {
@@ -2839,13 +2833,18 @@ body.editing main {
   .canvas-stage {
     position: sticky;
     z-index: 30;
-    top: env(safe-area-inset-top, 0px);
+    top: 0;
     width: 100%;
     height: clamp(380px, 52dvh, 470px);
     min-height: 0;
     padding: 14px;
     flex: 0 0 auto;
     order: 3;
+  }
+
+  .source-editor .corner-magnifier {
+    width: 116px;
+    height: 116px;
   }
 
   .statusbar {
@@ -3197,6 +3196,12 @@ body.editing main {
   }
 }
 
+@media (max-width: 680px) and (display-mode: standalone) {
+  .canvas-stage {
+    top: env(safe-area-inset-top, 0px);
+  }
+}
+
 @media (min-width: 681px) and (pointer: coarse),
   (min-width: 681px) and (any-pointer: coarse),
   (min-width: 681px) and (hover: none) {
@@ -3312,10 +3317,6 @@ body.editing main {
   .clipboard-button {
     min-height: 34px;
     grid-column: 1 / -1;
-  }
-
-  .editor-tip span {
-    display: none;
   }
 
   .palette-guide {

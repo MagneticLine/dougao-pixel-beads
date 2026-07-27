@@ -43,6 +43,7 @@
     fileName: $("#fileName"),
     sourceCanvas: $("#sourceCanvas"),
     sourceEditor: $("#sourceEditor"),
+    cornerMagnifier: $("#cornerMagnifier"),
     patternCanvas: $("#patternCanvas"),
     originalCanvas: $("#originalCanvas"),
     canvasStage: $("#canvasStage"),
@@ -1202,12 +1203,175 @@
     if (elements.canvasStage.style.height !== height) elements.canvasStage.style.height = height;
   }
 
+  function frameHandleRadius() {
+    return (coarsePointerQuery.matches ? 28 : 18) * state.sourceView.dpr;
+  }
+
+  function hideCornerMagnifier() {
+    elements.cornerMagnifier.hidden = true;
+    elements.cornerMagnifier.removeAttribute("data-corner");
+  }
+
+  function calculateCornerMagnifierPosition(pointerX, pointerY, width, height, lensSize) {
+    const radius = lensSize / 2;
+    const horizontalDirection = pointerX < width / 2 ? 1 : -1;
+    const verticalDirection = pointerY < height / 2 ? 1 : -1;
+    const margin = radius + 8;
+    return {
+      x: clamp(
+        pointerX + horizontalDirection * (radius + 48),
+        margin,
+        Math.max(margin, width - margin),
+      ),
+      y: clamp(
+        pointerY + verticalDirection * (radius + 52),
+        margin,
+        Math.max(margin, height - margin),
+      ),
+    };
+  }
+
+  function positionCornerMagnifier(clientX, clientY) {
+    const lens = elements.cornerMagnifier;
+    const editorRect = elements.sourceEditor.getBoundingClientRect();
+    lens.hidden = false;
+    const lensSize = Math.max(1, lens.getBoundingClientRect().width);
+    const pointerX = clamp(clientX - editorRect.left, 0, editorRect.width);
+    const pointerY = clamp(clientY - editorRect.top, 0, editorRect.height);
+    const position = calculateCornerMagnifierPosition(
+      pointerX,
+      pointerY,
+      editorRect.width,
+      editorRect.height,
+      lensSize,
+    );
+    lens.style.left = `${position.x}px`;
+    lens.style.top = `${position.y}px`;
+    lens.dataset.centerX = position.x.toFixed(1);
+    lens.dataset.centerY = position.y.toFixed(1);
+  }
+
+  function drawCornerMagnifier(sourceCanvas, target, corner, projector) {
+    const drag = state.frameDrag;
+    if (!drag || drag.type !== "corner" || !drag.pointerClient) {
+      hideCornerMagnifier();
+      return;
+    }
+    positionCornerMagnifier(drag.pointerClient.x, drag.pointerClient.y);
+    const lens = elements.cornerMagnifier;
+    const bounds = lens.getBoundingClientRect();
+    const density = Math.min(window.devicePixelRatio || 1, 2);
+    const pixelWidth = Math.max(2, Math.round(bounds.width * density));
+    const pixelHeight = Math.max(2, Math.round(bounds.height * density));
+    if (lens.width !== pixelWidth) lens.width = pixelWidth;
+    if (lens.height !== pixelHeight) lens.height = pixelHeight;
+
+    const context = lens.getContext("2d");
+    const magnification = coarsePointerQuery.matches ? 3 : 3.25;
+    const sourceWidth = lens.width / magnification;
+    const sourceHeight = lens.height / magnification;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, lens.width, lens.height);
+    context.save();
+    context.beginPath();
+    context.arc(lens.width / 2, lens.height / 2, Math.min(lens.width, lens.height) / 2, 0, Math.PI * 2);
+    context.clip();
+    context.fillStyle = "#dedbd3";
+    context.fillRect(0, 0, lens.width, lens.height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(
+      sourceCanvas,
+      target.x - sourceWidth / 2,
+      target.y - sourceHeight / 2,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      lens.width,
+      lens.height,
+    );
+
+    const centerX = lens.width / 2;
+    const centerY = lens.height / 2;
+    const toLensPoint = (point) => ({
+      x: centerX + (point.x - target.x) * magnification,
+      y: centerY + (point.y - target.y) * magnification,
+    });
+    const strokeLensGridLine = (start, end) => {
+      const lensStart = toLensPoint(start);
+      const lensEnd = toLensPoint(end);
+      context.globalCompositeOperation = "difference";
+      context.strokeStyle = "#ffffff";
+      context.lineWidth = 1.35 * density;
+      context.beginPath();
+      context.moveTo(lensStart.x, lensStart.y);
+      context.lineTo(lensEnd.x, lensEnd.y);
+      context.stroke();
+      context.globalCompositeOperation = "source-over";
+      context.strokeStyle = "rgba(255, 255, 255, 0.96)";
+      context.lineWidth = 0.8 * density;
+      context.beginPath();
+      context.moveTo(lensStart.x, lensStart.y);
+      context.lineTo(lensEnd.x, lensEnd.y);
+      context.stroke();
+    };
+    for (let col = 1; col < state.cols; col += 1) {
+      strokeLensGridLine(
+        canvasFramePoint(projectGridPoint(projector, col, 0)),
+        canvasFramePoint(projectGridPoint(projector, col, state.rows)),
+      );
+    }
+    for (let row = 1; row < state.rows; row += 1) {
+      strokeLensGridLine(
+        canvasFramePoint(projectGridPoint(projector, 0, row)),
+        canvasFramePoint(projectGridPoint(projector, state.cols, row)),
+      );
+    }
+    const lensFrame = state.frame.map((point) => toLensPoint(canvasFramePoint(point)));
+    context.globalCompositeOperation = "source-over";
+    context.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    context.lineWidth = 1.15 * density;
+    context.beginPath();
+    context.moveTo(lensFrame[0].x, lensFrame[0].y);
+    for (let index = 1; index < lensFrame.length; index += 1) {
+      context.lineTo(lensFrame[index].x, lensFrame[index].y);
+    }
+    context.closePath();
+    context.stroke();
+
+    const gap = 5 * density;
+    const arm = 18 * density;
+    context.globalCompositeOperation = "difference";
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = Math.max(1.25, 1.15 * density);
+    context.beginPath();
+    context.moveTo(centerX - arm, centerY);
+    context.lineTo(centerX - gap, centerY);
+    context.moveTo(centerX + gap, centerY);
+    context.lineTo(centerX + arm, centerY);
+    context.moveTo(centerX, centerY - arm);
+    context.lineTo(centerX, centerY - gap);
+    context.moveTo(centerX, centerY + gap);
+    context.lineTo(centerX, centerY + arm);
+    context.stroke();
+    context.restore();
+    lens.dataset.corner = String(corner);
+    lens.dataset.magnification = magnification.toFixed(2);
+  }
+
   function drawSourceThumb() {
-    if (!state.image) return;
+    if (!state.image) {
+      hideCornerMagnifier();
+      return;
+    }
     sizeSourceEditor();
     const canvas = elements.sourceCanvas;
     const box = elements.sourceEditor.getBoundingClientRect();
-    if (box.width < 2 || box.height < 2) return;
+    if (box.width < 2 || box.height < 2) {
+      hideCornerMagnifier();
+      return;
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2, 3200 / Math.max(box.width, box.height));
     const pixelWidth = Math.max(260, Math.round(box.width * dpr));
     const pixelHeight = Math.max(180, Math.round(box.height * dpr));
@@ -1236,6 +1400,16 @@
 
     const frame = state.frame.map(canvasFramePoint);
     const projector = createFrameProjector();
+    if (state.frameDrag?.type === "corner") {
+      drawCornerMagnifier(
+        canvas,
+        frame[state.frameDrag.corner],
+        state.frameDrag.corner,
+        projector,
+      );
+    } else {
+      hideCornerMagnifier();
+    }
     ctx.save();
     ctx.fillStyle = "rgba(18, 20, 19, 0.58)";
     ctx.beginPath();
@@ -1498,7 +1672,7 @@
       return;
     }
     const point = pointerImagePoint(event);
-    const handleRadius = 18 * state.sourceView.dpr;
+    const handleRadius = frameHandleRadius();
     let corner = -1;
     let nearest = Infinity;
     state.frame.forEach((framePoint, index) => {
@@ -1518,8 +1692,11 @@
       initial: state.frame.map((framePoint) => ({ ...framePoint })),
       initialPan: { ...state.sourcePan },
       initialView: { ...state.sourceView },
+      pointerClient: { x: event.clientX, y: event.clientY },
     };
     elements.sourceCanvas.setPointerCapture?.(event.pointerId);
+    if (corner >= 0) drawSourceThumb();
+    else hideCornerMagnifier();
     event.preventDefault();
   }
 
@@ -1530,7 +1707,7 @@
         elements.sourceCanvas.style.cursor = "crosshair";
         return;
       }
-      const handleRadius = 18 * state.sourceView.dpr;
+      const handleRadius = frameHandleRadius();
       let corner = -1;
       let nearest = Infinity;
       state.frame.forEach((framePoint, index) => {
@@ -1552,6 +1729,7 @@
       return;
     }
     const drag = state.frameDrag;
+    drag.pointerClient = { x: event.clientX, y: event.clientY };
     if (drag.type === "corner") {
       const cornerPoint = {
         x: clamp(point.x, 0, 1),
@@ -1608,6 +1786,7 @@
     if (!state.frameDrag) return;
     const dragType = state.frameDrag.type;
     state.frameDrag = null;
+    hideCornerMagnifier();
     elements.sourceCanvas.releasePointerCapture?.(event.pointerId);
     elements.sourceCanvas.style.cursor = "grab";
     drawSourceThumb();
@@ -2055,6 +2234,83 @@
     return values.length % 2 ? values[middle] : Math.round((values[middle - 1] + values[middle]) / 2);
   }
 
+  function extractDominantCellSample(colors) {
+    const opaque = [];
+    const alphas = [];
+    const buckets = new Map();
+    for (const raw of colors) {
+      const alpha = clamp(Math.round(raw[3]), 0, 255);
+      alphas.push(alpha);
+      if (alpha < 20) continue;
+      const color = [
+        clamp(Math.round(raw[0]), 0, 255),
+        clamp(Math.round(raw[1]), 0, 255),
+        clamp(Math.round(raw[2]), 0, 255),
+        alpha,
+      ];
+      opaque.push(color);
+      const key = `${color[0] >> 4},${color[1] >> 4},${color[2] >> 4}`;
+      const bucket = buckets.get(key) || { r: 0, g: 0, b: 0, count: 0 };
+      bucket.r += color[0];
+      bucket.g += color[1];
+      bucket.b += color[2];
+      bucket.count += 1;
+      buckets.set(key, bucket);
+    }
+
+    const alpha = median(alphas);
+    if (!opaque.length) {
+      return {
+        color: [0, 0, 0, alpha],
+        variability: 0,
+        dominantCoverage: 0,
+        opaqueCoverage: 0,
+      };
+    }
+
+    const seeds = [...buckets.values()]
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    let dominant = [];
+    let dominantSeedCount = 0;
+    const clusterRadiusSquared = 48 ** 2;
+    for (const seed of seeds) {
+      const seedR = seed.r / seed.count;
+      const seedG = seed.g / seed.count;
+      const seedB = seed.b / seed.count;
+      const members = opaque.filter((color) => {
+        const red = color[0] - seedR;
+        const green = color[1] - seedG;
+        const blue = color[2] - seedB;
+        return red * red + green * green + blue * blue <= clusterRadiusSquared;
+      });
+      if (
+        members.length > dominant.length ||
+        (members.length === dominant.length && seed.count > dominantSeedCount)
+      ) {
+        dominant = members;
+        dominantSeedCount = seed.count;
+      }
+    }
+    if (!dominant.length) dominant = opaque;
+
+    const red = median(dominant.map((color) => color[0]));
+    const green = median(dominant.map((color) => color[1]));
+    const blue = median(dominant.map((color) => color[2]));
+    const deviations = dominant.map(
+      (color) =>
+        Math.abs(color[0] - red) +
+        Math.abs(color[1] - green) +
+        Math.abs(color[2] - blue),
+    );
+    return {
+      color: [red, green, blue, alpha],
+      variability: median(deviations) / 3,
+      dominantCoverage: dominant.length / opaque.length,
+      opaqueCoverage: opaque.length / Math.max(1, colors.length),
+    };
+  }
+
   function srgbToLinear(channel) {
     const c = channel / 255;
     return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
@@ -2087,6 +2343,15 @@
     const photoMode = activeSourceMode() === "photo";
     const samples = [];
     const confidences = [];
+    const pixelSamplingPatches = photoMode
+      ? []
+      : [
+          { shiftX: 0, shiftY: 0, offsets: [-0.28, -0.14, 0, 0.14, 0.28] },
+          { shiftX: -0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
+          { shiftX: 0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
+          { shiftX: 0, shiftY: -0.18, offsets: [-0.12, 0, 0.12] },
+          { shiftX: 0, shiftY: 0.18, offsets: [-0.12, 0, 0.12] },
+        ];
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
@@ -2110,21 +2375,12 @@
             }
           }
         } else {
-          // A slightly inaccurate frame should not push the sample onto a grid line.
-          // Test several nearby inner patches and keep the most color-stable one.
-          const candidateShifts = [
-            [0, 0],
-            [-0.17, 0],
-            [0.17, 0],
-            [0, -0.17],
-            [0, 0.17],
-          ];
-          let bestScore = Infinity;
-          let bestColors = [];
-          for (const [shiftX, shiftY] of candidateShifts) {
-            const candidateColors = [];
-            for (const offsetY of [-0.14, 0, 0.14]) {
-              for (const offsetX of [-0.14, 0, 0.14]) {
+          // Read most of the safe inner area instead of trusting only the center.
+          // Thin labels, anti-aliased glyphs and slightly misplaced grid lines become
+          // minority color clusters, while the cell background remains dominant.
+          for (const { shiftX, shiftY, offsets } of pixelSamplingPatches) {
+            for (const offsetY of offsets) {
+              for (const offsetX of offsets) {
                 const point = viewPointToSource(
                   projectGridPoint(
                     projector,
@@ -2134,36 +2390,33 @@
                     rows,
                   ),
                 );
-                candidateColors.push(readSourcePixel(source, point.x, point.y));
+                colors.push(readSourcePixel(source, point.x, point.y));
               }
             }
-            const opaque = candidateColors.filter((color) => color[3] >= 20);
-            let variability = 0;
-            if (opaque.length) {
-              const center = [
-                median(opaque.map((color) => color[0])),
-                median(opaque.map((color) => color[1])),
-                median(opaque.map((color) => color[2])),
-              ];
-              variability =
-                median(
-                  opaque.map(
-                    (color) =>
-                      Math.abs(color[0] - center[0]) +
-                      Math.abs(color[1] - center[1]) +
-                      Math.abs(color[2] - center[2]),
-                  ),
-                ) / 3;
-            }
-            const distancePenalty = Math.hypot(shiftX, shiftY) * 14;
-            const coveragePenalty = (1 - opaque.length / candidateColors.length) * 4;
-            const score = variability + distancePenalty + coveragePenalty;
-            if (score < bestScore) {
-              bestScore = score;
-              bestColors = candidateColors;
-            }
           }
-          colors.push(...bestColors);
+          const dominant = extractDominantCellSample(colors);
+          const alpha = dominant.color[3];
+          if (
+            !dominant.opaqueCoverage ||
+            (elements.keepTransparent.checked && alpha < 100)
+          ) {
+            samples.push({ r: 0, g: 0, b: 0, a: 0, lab: null });
+            confidences.push(1);
+            continue;
+          }
+          const color = {
+            r: dominant.color[0],
+            g: dominant.color[1],
+            b: dominant.color[2],
+            a: alpha,
+          };
+          color.lab = rgbToLab(color);
+          const ambiguityPenalty = Math.max(0, 0.72 - dominant.dominantCoverage) * 35;
+          samples.push(color);
+          confidences.push(
+            clamp(1 - (dominant.variability + ambiguityPenalty) / 50, 0, 1),
+          );
+          continue;
         }
 
         colors.sort(
@@ -4677,7 +4930,7 @@
     updateFrameMode();
     requestAnimationFrame(detectGrantedClipboardImage);
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("./sw-v57.js").catch(() => {});
+      navigator.serviceWorker.register("./sw-v60.js").catch(() => {});
     }
     window.addEventListener(
       "load",
@@ -4691,6 +4944,8 @@
   const coreApi = Object.freeze({
     clamp,
     median,
+    extractDominantCellSample,
+    calculateCornerMagnifierPosition,
     rgbToLab,
     labDistance,
     scoreGridCount,

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640">
+  <defs>
+    <pattern id="labels" width="40" height="40" patternUnits="userSpaceOnUse">
+      <rect width="40" height="40" fill="none" stroke="#151515" stroke-width="2"/>
+      <text
+        x="20"
+        y="25"
+        fill="#111111"
+        font-family="Arial, sans-serif"
+        font-size="15"
+        font-weight="700"
+        text-anchor="middle"
+      >C4</text>
+    </pattern>
+  </defs>
+  <rect width="320" height="320" x="0" y="0" fill="#30B0DA"/>
+  <rect width="320" height="320" x="320" y="0" fill="#EFBD2B"/>
+  <rect width="320" height="320" x="0" y="320" fill="#D13036"/>
+  <rect width="320" height="320" x="320" y="320" fill="#FEF8E8"/>
+  <rect width="640" height="640" fill="url(#labels)"/>
+</svg>
