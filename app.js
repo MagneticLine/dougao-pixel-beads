@@ -2371,6 +2371,7 @@
       return null;
     }
     return {
+      engine: "hybrid",
       cols,
       rows,
       frame,
@@ -2427,6 +2428,11 @@
     };
   }
 
+  function recognitionCandidateLabel(detection, index) {
+    if (detection.engine === "legacy") return "旧方法";
+    return index === 0 ? "推荐" : `候选 ${index + 1}`;
+  }
+
   function renderRecognitionCandidates() {
     const candidates = state.recognitionCandidates;
     const panel = elements.recognitionCandidates;
@@ -2447,12 +2453,18 @@
       const angle = Math.abs((normalizedHybridAngle(detection.candidate?.angle) * 180) / Math.PI);
       button.type = "button";
       button.dataset.candidateIndex = String(index);
+      button.dataset.recognitionEngine = detection.engine;
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(index === state.recognitionCandidateIndex));
       button.classList.toggle("active", index === state.recognitionCandidateIndex);
-      label.textContent = index === 0 ? "推荐" : `候选 ${index + 1}`;
+      label.textContent = recognitionCandidateLabel(detection, index);
       dimensions.textContent = `${detection.cols} × ${detection.rows}`;
-      detail.textContent = angle >= 0.5 ? `倾斜 ${angle.toFixed(1)}°` : "水平网格";
+      detail.textContent =
+        detection.engine === "legacy"
+          ? "原有识别逻辑"
+          : angle >= 0.5
+            ? `倾斜 ${angle.toFixed(1)}°`
+            : "水平网格";
       button.title = `${label.textContent}：${dimensions.textContent}，${detail.textContent}`;
       button.append(label, dimensions, detail);
       list.append(button);
@@ -2460,7 +2472,10 @@
 
     elements.recognitionCandidateStatus.textContent =
       state.recognitionCandidateIndex >= 0
-        ? `当前：${state.recognitionCandidateIndex === 0 ? "推荐" : `候选 ${state.recognitionCandidateIndex + 1}`}`
+        ? `当前：${recognitionCandidateLabel(
+            candidates[state.recognitionCandidateIndex],
+            state.recognitionCandidateIndex,
+          )}`
         : "当前已手动调整";
     panel.hidden = false;
     setMobileControlPanelHeight();
@@ -2488,13 +2503,55 @@
     renderRecognitionCandidates();
   }
 
+  function normalizeLegacyFrame(detection) {
+    const sourceFrame = detection?.sourceFrame;
+    if (!Array.isArray(sourceFrame) || sourceFrame.length !== 4) return null;
+    const frame = sourceFrame
+      .map(sourcePointToView)
+      .map((point) => ({
+        x: clamp(point.x, 0, 1),
+        y: clamp(point.y, 0, 1),
+      }));
+    if (!frameIsConvex(frame)) return null;
+    return frame;
+  }
+
+  function frameRequiresFreeMode(frame) {
+    const tolerance = 0.0025;
+    return (
+      Math.abs(frame[0].y - frame[1].y) > tolerance ||
+      Math.abs(frame[2].y - frame[3].y) > tolerance ||
+      Math.abs(frame[0].x - frame[3].x) > tolerance ||
+      Math.abs(frame[1].x - frame[2].x) > tolerance
+    );
+  }
+
+  function applyLegacyCandidate(detection, activeIndex = 0) {
+    state.cols = detection.cols;
+    state.rows = detection.rows;
+    state.frame = detection.frame;
+    state.frameMode =
+      detection.frameMode === "free" || frameRequiresFreeMode(detection.frame)
+        ? "free"
+        : "rect";
+    state.detectionConfidence = detection.confidence;
+    state.recognitionEngine = "legacy";
+    state.recognitionCandidateIndex = activeIndex;
+    syncCropFromFrame();
+    updateFrameMode();
+    renderRecognitionCandidates();
+  }
+
   async function selectRecognitionCandidate(index) {
     const stored = state.recognitionCandidates[index];
     if (!state.image || !stored) return;
-    const frame = normalizeHybridFrame(stored.candidate, {
-      width: stored.analysisWidth,
-      height: stored.analysisHeight,
-    });
+    const frame =
+      stored.engine === "legacy"
+        ? normalizeLegacyFrame(stored)
+        : normalizeHybridFrame(stored.candidate, {
+            width: stored.analysisWidth,
+            height: stored.analysisHeight,
+          });
     if (!frame) {
       showToast("这个候选无法用于当前旋转角度，请先归零后重试");
       return;
@@ -2503,14 +2560,19 @@
     elements.detectButton.disabled = true;
     elements.recognitionCandidates.classList.add("busy");
     try {
-      applyHybridDetection({ ...stored, frame }, index);
-      elements.workspace.dataset.recognitionEngine = "hybrid";
+      if (stored.engine === "legacy") {
+        applyLegacyCandidate({ ...stored, frame }, index);
+      } else {
+        applyHybridDetection({ ...stored, frame }, index);
+      }
+      elements.workspace.dataset.recognitionEngine = stored.engine;
       elements.gridCols.value = state.cols;
       elements.gridRows.value = state.rows;
       drawSourceThumb();
       fitSourceFrameToViewport(0.8);
+      const label = recognitionCandidateLabel(stored, index);
       elements.detectHint.textContent =
-        `已切换到${index === 0 ? "推荐结果" : `候选 ${index + 1}`}：${state.cols} × ${state.rows}；` +
+        `已切换到${label === "推荐" ? "推荐结果" : label}：${state.cols} × ${state.rows}；` +
         "请在原图中检查格线，仍可继续手动校准。";
       await processImage({ resetHistory: true });
     } finally {
@@ -2528,10 +2590,16 @@
     state.detectionConfidence =
       (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
     state.recognitionEngine = "legacy";
-    state.recognitionCandidates = [];
-    state.recognitionCandidateIndex = -1;
-    renderRecognitionCandidates();
-    return { analysis, frameAligned };
+    return {
+      engine: "legacy",
+      cols: state.cols,
+      rows: state.rows,
+      frame: state.frame.map((point) => ({ ...point })),
+      sourceFrame: state.frame.map(viewPointToSource),
+      frameMode: state.frameMode,
+      confidence: state.detectionConfidence,
+      frameAligned,
+    };
   }
 
   async function autoDetect(isInitial = false, { engine = "auto" } = {}) {
@@ -2555,13 +2623,26 @@
         }
       }
       if (token !== state.processingToken) return;
+      let legacyDetection = null;
+      try {
+        legacyDetection = applyLegacyDetection();
+      } catch (error) {
+        console.warn("Legacy recognition unavailable.", error);
+      }
+      if (token !== state.processingToken) return;
       let frameAligned = false;
       if (hybridDetection) {
-        state.recognitionCandidates = hybridDetection.candidates;
+        state.recognitionCandidates = legacyDetection
+          ? [...hybridDetection.candidates, legacyDetection]
+          : hybridDetection.candidates;
         applyHybridDetection(hybridDetection, 0);
         frameAligned = true;
+      } else if (legacyDetection) {
+        state.recognitionCandidates = [legacyDetection];
+        applyLegacyCandidate(legacyDetection, 0);
+        frameAligned = legacyDetection.frameAligned;
       } else {
-        ({ frameAligned } = applyLegacyDetection());
+        throw new Error("No recognition engine returned a valid result.");
       }
       if (token !== state.processingToken) return;
       if (frameAligned) {
@@ -5400,7 +5481,7 @@
           recognitionSeed,
         });
         return {
-          version: `v66-${state.recognitionEngine}`,
+          version: `v67-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5444,7 +5525,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v66.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v67.js").catch(() => {});
       }
     }
     window.addEventListener(
