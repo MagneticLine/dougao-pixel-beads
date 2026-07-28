@@ -155,6 +155,37 @@ canvas:focus-visible {
   font-weight: 800;
 }
 
+.github-button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--ink);
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.github-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.github-button:hover {
+  border-color: rgba(36, 33, 29, 0.4);
+  color: #fff;
+  background: var(--ink);
+  transform: translateY(-1px);
+}
+
+.github-button:focus-visible {
+  outline: 3px solid rgba(66, 124, 164, 0.35);
+  outline-offset: 2px;
+}
+
 main {
   width: min(1440px, 100%);
   margin: 0 auto;
