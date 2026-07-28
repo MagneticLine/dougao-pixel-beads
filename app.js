@@ -302,6 +302,7 @@
   }
 
   async function detectGrantedClipboardImage() {
+    if (mobileLayoutQuery.matches || coarsePointerQuery.matches) return;
     if (elements.hero.hidden || state.clipboardFile || !navigator.clipboard?.read) return;
     if (!navigator.permissions?.query) return;
     try {
@@ -4782,6 +4783,11 @@
 
   function bindEvents() {
     elements.selectButton.addEventListener("click", () => elements.fileInput.click());
+    elements.dropZone.addEventListener("click", (event) => {
+      if (!mobileLayoutQuery.matches && !coarsePointerQuery.matches) return;
+      if (event.target.closest("button")) return;
+      elements.fileInput.click();
+    });
     elements.replaceButton.addEventListener("click", () => elements.fileInput.click());
     elements.fileInput.addEventListener("change", () => {
       const file = elements.fileInput.files[0];
@@ -4881,7 +4887,9 @@
       if (event.target === elements.cropDialog) cancelCrop();
     });
 
-    elements.helpButton.addEventListener("click", () => safeShowModal(elements.helpDialog));
+    [elements.helpButton, ...$$("[data-open-help]")].forEach((button) => {
+      button.addEventListener("click", () => safeShowModal(elements.helpDialog));
+    });
     $$(".modal-close").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -5274,7 +5282,7 @@
           recognitionSeed,
         });
         return {
-          version: `v64-${state.recognitionEngine}`,
+          version: `v65-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5318,7 +5326,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v64.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v65.js").catch(() => {});
       }
     }
     window.addEventListener(

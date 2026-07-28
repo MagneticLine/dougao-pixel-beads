@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v64.webmanifest" />
-    <link rel="stylesheet" href="./styles-v64.css" />
+    <link rel="manifest" href="./manifest-v65.webmanifest" />
+    <link rel="stylesheet" href="./styles-v65.css" />
   </head>
   <body>
     <header class="topbar">
@@ -35,54 +35,127 @@
 
     <main>
       <section class="hero" id="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">像素修复 · 网格识别 · 稳定取色</p>
-          <h1>把模糊像素图，<br />变成<strong>能照着拼</strong>的图纸。</h1>
-          <p class="hero-desc">
-            自动识别每一颗豆的位置，避开压缩杂色和模糊边缘，合并近似色并统计用量。
-            无需登录，不上传图片。
-          </p>
+        <div class="hero-stage">
+          <div class="hero-copy">
+            <p class="eyebrow">像素修复 · 网格识别 · 稳定取色</p>
+            <h1>把模糊像素图，<br />变成<strong>能照着拼</strong>的图纸。</h1>
+            <p class="hero-desc">
+              自动识别每一颗豆的位置，避开压缩杂色和模糊边缘，合并近似色并统计用量。
+              无需登录，不上传图片。
+            </p>
+          </div>
+
+          <div class="upload-card" id="dropZone">
+            <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
+            <div class="upload-visual" aria-hidden="true">
+              <div class="mini-pattern">
+                <i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i>
+                <i></i><i></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <h2 class="desktop-only">拖一张像素图到这里</h2>
+            <p class="desktop-only">也可以粘贴图片，或从相册中选择</p>
+            <h2 class="mobile-only">选择一张图片开始</h2>
+            <p class="mobile-only">从相册或文件中选择，下一步可以直接裁剪</p>
+            <button class="primary-button upload-button" id="selectButton" type="button">
+              <span aria-hidden="true">＋</span>
+              <b class="desktop-only">选择图片</b>
+              <b class="mobile-only">从相册或文件选择</b>
+            </button>
+            <div class="clipboard-card" id="clipboardCard">
+              <div class="clipboard-preview" aria-hidden="true">
+                <img id="clipboardPreview" alt="" hidden />
+                <span id="clipboardPlaceholder">⌘V</span>
+              </div>
+              <span class="clipboard-copy">
+                <b id="clipboardTitle">剪贴板里的图片也能用</b>
+                <small id="clipboardMeta">已授权会自动读取；首次使用请点击右侧授权</small>
+              </span>
+              <button class="clipboard-button" id="clipboardButton" type="button">粘贴剪贴板图片</button>
+            </div>
+            <small class="desktop-only">支持 PNG、JPG、WebP、GIF、BMP · 建议小于 20 MB</small>
+            <small class="mobile-only">支持常见图片格式 · 图片只在本机处理</small>
+          </div>
         </div>
 
-        <div class="upload-card" id="dropZone">
-          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
-          <div class="upload-visual" aria-hidden="true">
-            <div class="mini-pattern">
-              <i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i>
-            </div>
-          </div>
-          <h2>拖一张像素图到这里</h2>
-          <p>也可以粘贴图片，或从相册中选择</p>
-          <button class="primary-button" id="selectButton" type="button">
-            <span aria-hidden="true">＋</span> 选择图片
-          </button>
-          <div class="clipboard-card" id="clipboardCard">
-            <div class="clipboard-preview" aria-hidden="true">
-              <img id="clipboardPreview" alt="" hidden />
-              <span id="clipboardPlaceholder">⌘V</span>
-            </div>
-            <span class="clipboard-copy">
-              <b id="clipboardTitle">剪贴板里的图片也能用</b>
-              <small id="clipboardMeta">已授权会自动读取；首次使用请点击右侧授权</small>
+        <section class="home-details" id="homeGuide" aria-labelledby="homeGuideTitle">
+          <a class="lab-card" href="./recognition-lab/index.html">
+            <span class="lab-visual" aria-hidden="true">
+              <i class="lab-source"></i>
+              <i class="lab-frame lab-frame-one"></i>
+              <i class="lab-frame lab-frame-two"></i>
+              <b>82%</b>
             </span>
-            <button class="clipboard-button" id="clipboardButton" type="button">粘贴剪贴板图片</button>
-          </div>
-          <small>支持 PNG、JPG、WebP、GIF、BMP · 建议小于 20 MB</small>
-        </div>
+            <span class="lab-card-copy">
+              <small>副功能 · 算法验证工具</small>
+              <strong>识别实验室</strong>
+              <span>
+                在真实案例上查看旧算法与混合算法的候选结果，观察边界、行列数和置信度。
+              </span>
+              <em>
+                进入识别实验室
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M4 10h11M11 6l4 4-4 4" />
+                </svg>
+              </em>
+            </span>
+          </a>
 
-        <div class="feature-strip" aria-label="主要能力">
-          <div><span>01</span><b>识别网格</b><small>自动推测行列数</small></div>
-          <div><span>02</span><b>清理杂色</b><small>避开边缘与压缩噪点</small></div>
-          <div><span>03</span><b>合并近色</b><small>控制实际采购色数</small></div>
-          <div><span>04</span><b>导出图纸</b><small>编号、数量一目了然</small></div>
-        </div>
+          <div class="home-guide">
+            <header class="home-guide-head">
+              <p class="eyebrow">从原图到可用图纸</p>
+              <h2 id="homeGuideTitle">不只是把像素图放大。</h2>
+              <p>豆稿把识别、校准、取色和导出放在同一个本地工作区里，模糊截图和实物照片都能继续调整。</p>
+            </header>
+
+            <div class="capability-grid" aria-label="产品能力">
+              <article>
+                <span class="capability-index">01</span>
+                <h3>混合网格识别</h3>
+                <p>联合判断主体、格距和边界，自动给出行列数，也保留手动校准空间。</p>
+                <small>像素图 · 图纸 · 实物照片</small>
+              </article>
+              <article>
+                <span class="capability-index">02</span>
+                <h3>裁剪与精细校准</h3>
+                <p>导入后直接裁剪，再调整四角、旋转和网格，让格线真正对准每一颗豆。</p>
+                <small>矩形框选 · 自由四角 · 放大镜</small>
+              </article>
+              <article>
+                <span class="capability-index">03</span>
+                <h3>抗干扰稳定取色</h3>
+                <p>减少文字、孔洞、反光和压缩边缘的影响，并可合并近色、吸色和修改色号。</p>
+                <small>颜色清理 · 人工匹配 · 用量统计</small>
+              </article>
+              <article>
+                <span class="capability-index">04</span>
+                <h3>清晰图纸与工程数据</h3>
+                <p>按图纸规模生成足够清晰的编号和图例，亦可导出矩阵与可继续编辑的数据。</p>
+                <small>PNG · CSV · JSON · 打印 / PDF</small>
+              </article>
+            </div>
+
+            <div class="home-workflow">
+              <span class="workflow-title">
+                <small>第一次使用也很简单</small>
+                <b>三步得到图纸</b>
+              </span>
+              <ol>
+                <li><i>1</i><span><b>选择并裁剪</b><small>让主体占据画面大部分</small></span></li>
+                <li><i>2</i><span><b>检查网格与颜色</b><small>有偏差就直接校准</small></span></li>
+                <li><i>3</i><span><b>导出开始拼豆</b><small>保存图纸或工程数据</small></span></li>
+              </ol>
+              <button class="home-help-button" type="button" data-open-help>查看详细校准说明</button>
+            </div>
+          </div>
+        </section>
+
         <footer class="site-version" aria-label="当前版本">
-          豆稿 <b>v64</b>
-          <a href="./recognition-lab/index.html">识别实验室</a>
+          <span>豆稿 <b>v65</b></span>
+          <span>无需登录 · 图片仅在本机处理</span>
         </footer>
       </section>
 
@@ -438,6 +511,6 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v64.js"></script>
+    <script src="./app-v65.js"></script>
   </body>
 </html>
