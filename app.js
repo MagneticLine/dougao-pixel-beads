@@ -67,6 +67,9 @@
     resetFrameButton: $("#resetFrameButton"),
     detectButton: $("#detectButton"),
     detectHint: $("#detectHint"),
+    recognitionCandidates: $("#recognitionCandidates"),
+    recognitionCandidateList: $("#recognitionCandidateList"),
+    recognitionCandidateStatus: $("#recognitionCandidateStatus"),
     denoise: $("#denoise"),
     denoiseValue: $("#denoiseValue"),
     colorMerge: $("#colorMerge"),
@@ -182,6 +185,8 @@
     processingToken: 0,
     detectionConfidence: 0,
     recognitionEngine: "legacy",
+    recognitionCandidates: [],
+    recognitionCandidateIndex: -1,
     mobileControlIndex: 0,
     exportPngBlob: null,
     exportPngGeneration: 0,
@@ -1190,6 +1195,9 @@
     state.matchDrag = null;
     state.previewDrag = null;
     state.previewPosition = null;
+    state.recognitionCandidates = [];
+    state.recognitionCandidateIndex = -1;
+    renderRecognitionCandidates();
     setLivePreviewCollapsed(mobileLayoutQuery.matches);
     elements.livePatternPreview.style.removeProperty("left");
     elements.livePatternPreview.style.removeProperty("top");
@@ -1918,6 +1926,7 @@
     elements.sourceCanvas.style.cursor = "grab";
     drawSourceThumb();
     if (dragType !== "pan") {
+      markRecognitionCandidateCustom();
       syncCropFromFrame();
       processImage({ resetHistory: true, preservePalette: true });
     }
@@ -2341,6 +2350,45 @@
     return frame;
   }
 
+  function makeHybridDetection(candidate, candidateIndex, result, prepared) {
+    const frame = normalizeHybridFrame(candidate, prepared.canvas);
+    const cols = Math.round(Number(candidate?.frame?.cols));
+    const rows = Math.round(Number(candidate?.frame?.rows));
+    const confidence = clamp(
+      (Number(result.confidence) || 0) * (candidateIndex ? Math.max(0.58, 0.9 - candidateIndex * 0.08) : 1),
+      0,
+      1,
+    );
+    if (
+      !frame ||
+      !Number.isFinite(cols) ||
+      !Number.isFinite(rows) ||
+      cols < 2 ||
+      cols > 200 ||
+      rows < 2 ||
+      rows > 200
+    ) {
+      return null;
+    }
+    return {
+      cols,
+      rows,
+      frame,
+      confidence,
+      candidate,
+      candidateIndex,
+      analysisWidth: prepared.canvas.width,
+      analysisHeight: prepared.canvas.height,
+      elapsedMs: result.elapsedMs,
+    };
+  }
+
+  function normalizedHybridAngle(angle) {
+    const quarterTurn = Math.PI / 2;
+    const value = Number(angle) || 0;
+    return ((value + quarterTurn / 2) % quarterTurn + quarterTurn) % quarterTurn - quarterTurn / 2;
+  }
+
   async function analyzeWithHybridRecognition() {
     const recognition = await loadRecognitionCore();
     const maximumSide = 560;
@@ -2366,58 +2414,110 @@
       maximumPoints: 1650,
       maximumResults: 5,
     });
-    let selected = null;
+    const candidates = [];
     for (let index = 0; index < (result.candidates?.length || 0); index += 1) {
-      const candidate = result.candidates[index];
-      const frame = normalizeHybridFrame(candidate, prepared.canvas);
-      if (!frame) continue;
-      selected = { candidate, frame, index };
-      break;
+      const detection = makeHybridDetection(result.candidates[index], index, result, prepared);
+      if (detection) candidates.push(detection);
     }
-    const candidate = selected?.candidate;
-    const frame = selected?.frame;
-    const cols = Math.round(Number(candidate?.frame?.cols));
-    const rows = Math.round(Number(candidate?.frame?.rows));
-    const confidence = clamp(
-      (Number(result.confidence) || 0) * (selected?.index ? 0.82 : 1),
-      0,
-      1,
-    );
-    if (
-      !frame ||
-      !Number.isFinite(cols) ||
-      !Number.isFinite(rows) ||
-      cols < 2 ||
-      cols > 200 ||
-      rows < 2 ||
-      rows > 200 ||
-      confidence < 0.3
-    ) {
-      return null;
-    }
+    const selected = candidates[0];
+    if (!selected || selected.confidence < 0.3) return null;
     return {
-      cols,
-      rows,
-      frame,
-      confidence,
-      candidate,
-      candidateIndex: selected.index,
-      elapsedMs: result.elapsedMs,
+      ...selected,
+      candidates,
     };
   }
 
-  function applyHybridDetection(detection) {
+  function renderRecognitionCandidates() {
+    const candidates = state.recognitionCandidates;
+    const panel = elements.recognitionCandidates;
+    const list = elements.recognitionCandidateList;
+    if (!panel || !list) return;
+    list.replaceChildren();
+    if (candidates.length < 2) {
+      panel.hidden = true;
+      setMobileControlPanelHeight();
+      return;
+    }
+
+    candidates.forEach((detection, index) => {
+      const button = document.createElement("button");
+      const label = document.createElement("small");
+      const dimensions = document.createElement("b");
+      const detail = document.createElement("em");
+      const angle = Math.abs((normalizedHybridAngle(detection.candidate?.angle) * 180) / Math.PI);
+      button.type = "button";
+      button.dataset.candidateIndex = String(index);
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(index === state.recognitionCandidateIndex));
+      button.classList.toggle("active", index === state.recognitionCandidateIndex);
+      label.textContent = index === 0 ? "推荐" : `候选 ${index + 1}`;
+      dimensions.textContent = `${detection.cols} × ${detection.rows}`;
+      detail.textContent = angle >= 0.5 ? `倾斜 ${angle.toFixed(1)}°` : "水平网格";
+      button.title = `${label.textContent}：${dimensions.textContent}，${detail.textContent}`;
+      button.append(label, dimensions, detail);
+      list.append(button);
+    });
+
+    elements.recognitionCandidateStatus.textContent =
+      state.recognitionCandidateIndex >= 0
+        ? `当前：${state.recognitionCandidateIndex === 0 ? "推荐" : `候选 ${state.recognitionCandidateIndex + 1}`}`
+        : "当前已手动调整";
+    panel.hidden = false;
+    setMobileControlPanelHeight();
+  }
+
+  function markRecognitionCandidateCustom() {
+    if (!state.recognitionCandidates.length || state.recognitionCandidateIndex < 0) return;
+    state.recognitionCandidateIndex = -1;
+    renderRecognitionCandidates();
+  }
+
+  function applyHybridDetection(detection, activeIndex = 0) {
     state.cols = detection.cols;
     state.rows = detection.rows;
     state.frame = detection.frame;
     state.frameMode =
-      Math.abs(Number(detection.candidate.angle) || 0) > Math.PI / 360
+      Math.abs(normalizedHybridAngle(detection.candidate.angle)) > Math.PI / 360
         ? "free"
         : "rect";
     state.detectionConfidence = detection.confidence;
     state.recognitionEngine = "hybrid";
+    state.recognitionCandidateIndex = activeIndex;
     syncCropFromFrame();
     updateFrameMode();
+    renderRecognitionCandidates();
+  }
+
+  async function selectRecognitionCandidate(index) {
+    const stored = state.recognitionCandidates[index];
+    if (!state.image || !stored) return;
+    const frame = normalizeHybridFrame(stored.candidate, {
+      width: stored.analysisWidth,
+      height: stored.analysisHeight,
+    });
+    if (!frame) {
+      showToast("这个候选无法用于当前旋转角度，请先归零后重试");
+      return;
+    }
+
+    elements.detectButton.disabled = true;
+    elements.recognitionCandidates.classList.add("busy");
+    try {
+      applyHybridDetection({ ...stored, frame }, index);
+      elements.workspace.dataset.recognitionEngine = "hybrid";
+      elements.gridCols.value = state.cols;
+      elements.gridRows.value = state.rows;
+      drawSourceThumb();
+      fitSourceFrameToViewport(0.8);
+      elements.detectHint.textContent =
+        `已切换到${index === 0 ? "推荐结果" : `候选 ${index + 1}`}：${state.cols} × ${state.rows}；` +
+        "请在原图中检查格线，仍可继续手动校准。";
+      await processImage({ resetHistory: true });
+    } finally {
+      elements.recognitionCandidates.classList.remove("busy");
+      elements.detectButton.disabled = false;
+      renderRecognitionCandidates();
+    }
   }
 
   function applyLegacyDetection() {
@@ -2428,6 +2528,9 @@
     state.detectionConfidence =
       (analysis.xResult.confidence + analysis.yResult.confidence) / 2;
     state.recognitionEngine = "legacy";
+    state.recognitionCandidates = [];
+    state.recognitionCandidateIndex = -1;
+    renderRecognitionCandidates();
     return { analysis, frameAligned };
   }
 
@@ -2437,6 +2540,9 @@
     const token = ++state.processingToken;
     elements.processing.hidden = false;
     elements.detectButton.disabled = true;
+    state.recognitionCandidates = [];
+    state.recognitionCandidateIndex = -1;
+    renderRecognitionCandidates();
     await sleepFrame();
 
     try {
@@ -2451,7 +2557,8 @@
       if (token !== state.processingToken) return;
       let frameAligned = false;
       if (hybridDetection) {
-        applyHybridDetection(hybridDetection);
+        state.recognitionCandidates = hybridDetection.candidates;
+        applyHybridDetection(hybridDetection, 0);
         frameAligned = true;
       } else {
         ({ frameAligned } = applyLegacyDetection());
@@ -2468,11 +2575,13 @@
       elements.gridCols.value = state.cols;
       elements.gridRows.value = state.rows;
       elements.detectHint.textContent =
-        state.detectionConfidence > 0.7
-          ? frameAligned
-            ? "已根据多种网格证据同时校正框选与行列数；手动修改会立即更新图纸。"
-            : "行列数与框选已检查；手动修改会立即更新图纸。"
-          : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
+        state.recognitionCandidates.length > 1
+          ? `已生成 ${state.recognitionCandidates.length} 个候选，当前采用推荐结果；如格线不准可直接切换。`
+          : state.detectionConfidence > 0.7
+            ? frameAligned
+              ? "已根据多种网格证据同时校正框选与行列数；手动修改会立即更新图纸。"
+              : "行列数与框选已检查；手动修改会立即更新图纸。"
+            : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
       if (isInitial) {
         chooseInitialZoom();
@@ -4631,6 +4740,7 @@
   }
 
   function applyGridValues() {
+    markRecognitionCandidateCustom();
     drawSourceThumb();
     elements.detectHint.textContent = `已手动设为 ${state.cols} × ${state.rows}，正在自动更新图纸；“重新识别”会重新推测行列数。`;
     processDebounced();
@@ -4752,6 +4862,7 @@
   }
 
   function setFrameMode(mode) {
+    markRecognitionCandidateCustom();
     state.frameMode = mode === "free" ? "free" : "rect";
     if (state.frameMode === "rect") {
       const xs = state.frame.map((point) => point.x);
@@ -4774,7 +4885,9 @@
   }
 
   function setRotation(value) {
-    state.rotation = clamp(Number(value) || 0, -15, 15);
+    const nextRotation = clamp(Number(value) || 0, -15, 15);
+    if (Math.abs(nextRotation - state.rotation) > 1e-6) markRecognitionCandidateCustom();
+    state.rotation = nextRotation;
     elements.rotationInput.value = state.rotation.toFixed(1);
     elements.rotationValue.value = `${state.rotation.toFixed(1)}°`;
     drawSourceThumb();
@@ -4958,6 +5071,11 @@
       syncCropFromFrame();
       drawSourceThumb();
       autoDetect(false);
+    });
+    elements.recognitionCandidateList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-candidate-index]");
+      if (!button || elements.recognitionCandidates.classList.contains("busy")) return;
+      void selectRecognitionCandidate(Number(button.dataset.candidateIndex));
     });
     elements.rectModeButton.addEventListener("click", () => setFrameMode("rect"));
     elements.freeModeButton.addEventListener("click", () => setFrameMode("free"));
@@ -5282,7 +5400,7 @@
           recognitionSeed,
         });
         return {
-          version: `v65-${state.recognitionEngine}`,
+          version: `v66-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5326,7 +5444,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v65.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v66.js").catch(() => {});
       }
     }
     window.addEventListener(

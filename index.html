@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v65.webmanifest" />
-    <link rel="stylesheet" href="./styles-v65.css" />
+    <link rel="manifest" href="./manifest-v66.webmanifest" />
+    <link rel="stylesheet" href="./styles-v66.css" />
   </head>
   <body>
     <header class="topbar">
@@ -154,7 +154,7 @@
         </section>
 
         <footer class="site-version" aria-label="当前版本">
-          <span>豆稿 <b>v65</b></span>
+          <span>豆稿 <b>v66</b></span>
           <span>无需登录 · 图片仅在本机处理</span>
         </footer>
       </section>
@@ -231,6 +231,19 @@
                     </svg>
                     重新识别
                   </button>
+                </div>
+                <div class="recognition-candidates" id="recognitionCandidates" hidden>
+                  <header>
+                    <b>自动识别候选</b>
+                    <small id="recognitionCandidateStatus">点选后立即预览</small>
+                  </header>
+                  <div
+                    class="recognition-candidate-list"
+                    id="recognitionCandidateList"
+                    role="listbox"
+                    aria-label="自动识别候选"
+                  ></div>
+                  <p>候选按算法证据排序；切换会替换当前框选和行列数，之后仍可继续手动校准。</p>
                 </div>
                 <p class="hint" id="detectHint">上传后将自动推测网格尺寸；手动修改行列数会立即更新图纸。</p>
               </div>
@@ -511,6 +524,6 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v65.js"></script>
+    <script src="./app-v66.js"></script>
   </body>
 </html>
