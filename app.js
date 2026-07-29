@@ -5481,7 +5481,7 @@
           recognitionSeed,
         });
         return {
-          version: `v68-${state.recognitionEngine}`,
+          version: `v69-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5525,7 +5525,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v68.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v69.js").catch(() => {});
       }
     }
     window.addEventListener(
