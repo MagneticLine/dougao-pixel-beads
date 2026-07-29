@@ -224,7 +224,7 @@
                       <span class="grid-number-label">列数 <small>可滚轮</small></span>
                       <div class="grid-stepper">
                         <button type="button" data-grid-target="gridCols" data-grid-step="-1" aria-label="减少列数">−</button>
-                        <input id="gridCols" aria-label="列数" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" />
+                        <input id="gridCols" aria-label="列数" type="number" min="2" step="1" value="32" inputmode="numeric" />
                         <button type="button" data-grid-target="gridCols" data-grid-step="1" aria-label="增加列数">＋</button>
                       </div>
                     </div>
@@ -233,7 +233,7 @@
                       <span class="grid-number-label">行数 <small>可滚轮</small></span>
                       <div class="grid-stepper">
                         <button type="button" data-grid-target="gridRows" data-grid-step="-1" aria-label="减少行数">−</button>
-                        <input id="gridRows" aria-label="行数" type="number" min="2" max="200" step="1" value="32" inputmode="numeric" />
+                        <input id="gridRows" aria-label="行数" type="number" min="2" step="1" value="32" inputmode="numeric" />
                         <button type="button" data-grid-target="gridRows" data-grid-step="1" aria-label="增加行数">＋</button>
                       </div>
                     </div>
@@ -348,9 +348,22 @@
 
           <section class="preview-panel" aria-label="图纸预览">
             <div class="preview-toolbar">
-              <div class="view-tabs" role="tablist" aria-label="预览类型">
-                <button class="active" id="resultTab" type="button" role="tab" aria-selected="true">图纸</button>
-                <button id="originalTab" type="button" role="tab" aria-selected="false">校准原图</button>
+              <div class="view-switch" id="viewSwitch">
+                <div class="view-tabs" role="tablist" aria-label="预览类型">
+                  <button class="active" id="resultTab" type="button" role="tab" aria-selected="true">图纸</button>
+                  <button id="originalTab" type="button" role="tab" aria-selected="false">校准原图</button>
+                </div>
+                <span
+                  class="pattern-scale-controls"
+                  id="patternScaleControls"
+                  role="group"
+                  aria-label="图纸倍率"
+                >
+                  <small class="pattern-scale-label">倍率</small>
+                  <output id="patternScaleValue" aria-live="polite">1</output>
+                  <button id="patternScaleDown" type="button" aria-label="减小图纸倍率">−</button>
+                  <button id="patternScaleUp" type="button" aria-label="增大图纸倍率">＋</button>
+                </span>
               </div>
               <div class="toolbar-actions">
                 <button id="undoButton" type="button" disabled aria-label="撤销">↶</button>

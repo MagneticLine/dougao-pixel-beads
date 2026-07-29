@@ -14,6 +14,7 @@
       : { matches: false };
   const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
   const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
+  const MAX_PATTERN_DIMENSION = 200;
 
   const elements = {
     hero: $("#hero"),
@@ -114,10 +115,15 @@
     beadColorList: $("#beadColorList"),
     beadColorCount: $("#beadColorCount"),
     beadColorCancel: $("#beadColorCancel"),
+    viewSwitch: $("#viewSwitch"),
     resultTab: $("#resultTab"),
     originalTab: $("#originalTab"),
     undoButton: $("#undoButton"),
     redoButton: $("#redoButton"),
+    patternScaleControls: $("#patternScaleControls"),
+    patternScaleDown: $("#patternScaleDown"),
+    patternScaleValue: $("#patternScaleValue"),
+    patternScaleUp: $("#patternScaleUp"),
     zoomOut: $("#zoomOut"),
     zoomIn: $("#zoomIn"),
     zoomValue: $("#zoomValue"),
@@ -201,6 +207,7 @@
     colorEditorIndex: -1,
     colorEditorPointer: null,
     colorEditorDraft: { h: 0, s: 1, v: 1 },
+    patternScale: 1,
     zoom: 1,
     sourceZoom: 1,
     view: "result",
@@ -243,6 +250,52 @@
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  function calculatePatternDimensions(
+    cols,
+    rows,
+    requestedScale = 1,
+    maxDimension = MAX_PATTERN_DIMENSION,
+  ) {
+    const limit = Math.max(1, Math.floor(Number(maxDimension) || MAX_PATTERN_DIMENSION));
+    const sourceCols = clamp(Math.round(Number(cols) || 1), 1, limit);
+    const sourceRows = clamp(Math.round(Number(rows) || 1), 1, limit);
+    const maxScale = Math.max(
+      1,
+      Math.floor(limit / Math.max(sourceCols, sourceRows)),
+    );
+    const scale = clamp(
+      Math.round(Number(requestedScale) || 1),
+      1,
+      maxScale,
+    );
+    return {
+      sourceCols,
+      sourceRows,
+      cols: sourceCols * scale,
+      rows: sourceRows * scale,
+      scale,
+      maxScale,
+      maxDimension: limit,
+    };
+  }
+
+  function patternCellIndexAt(cells, sourceCols, scale, row, col) {
+    const normalizedScale = Math.max(1, Math.round(Number(scale) || 1));
+    const sourceRow = Math.floor(row / normalizedScale);
+    const sourceCol = Math.floor(col / normalizedScale);
+    return cells[sourceRow * sourceCols + sourceCol];
+  }
+
+  function getPatternDimensions() {
+    const dimensions = calculatePatternDimensions(
+      state.cols,
+      state.rows,
+      state.patternScale,
+    );
+    state.patternScale = dimensions.scale;
+    return dimensions;
+  }
+
   const defaultFrame = () => [
     { x: 0, y: 0 },
     { x: 1, y: 0 },
@@ -1238,6 +1291,7 @@
     state.frameDrag = null;
     state.frameMode = "rect";
     state.rotation = 0;
+    state.patternScale = 1;
     state.sourceZoom = 1;
     state.sourcePan = { x: 0, y: 0 };
     state.view = "source";
@@ -2371,19 +2425,35 @@
   }
 
   function applyDetectedGrid(analysis) {
-    state.cols = clamp(analysis.xResult.count, 2, 200);
-    state.rows = clamp(analysis.yResult.count, 2, 200);
+    state.cols = clamp(analysis.xResult.count, 2, MAX_PATTERN_DIMENSION);
+    state.rows = clamp(analysis.yResult.count, 2, MAX_PATTERN_DIMENSION);
     const cellX = analysis.width / state.cols;
     const cellY = analysis.height / state.rows;
     if (Math.max(cellX, cellY) / Math.max(0.01, Math.min(cellX, cellY)) > 1.45) {
       if (state.rows < 8 && state.cols >= 8) {
-        state.rows = clamp(Math.round(analysis.height / cellX), 2, 200);
+        state.rows = clamp(
+          Math.round(analysis.height / cellX),
+          2,
+          MAX_PATTERN_DIMENSION,
+        );
       } else if (state.cols < 8 && state.rows >= 8) {
-        state.cols = clamp(Math.round(analysis.width / cellY), 2, 200);
+        state.cols = clamp(
+          Math.round(analysis.width / cellY),
+          2,
+          MAX_PATTERN_DIMENSION,
+        );
       } else if (analysis.xResult.confidence > analysis.yResult.confidence + 0.12) {
-        state.rows = clamp(Math.round(analysis.height / cellX), 2, 200);
+        state.rows = clamp(
+          Math.round(analysis.height / cellX),
+          2,
+          MAX_PATTERN_DIMENSION,
+        );
       } else if (analysis.yResult.confidence > analysis.xResult.confidence + 0.12) {
-        state.cols = clamp(Math.round(analysis.width / cellY), 2, 200);
+        state.cols = clamp(
+          Math.round(analysis.width / cellY),
+          2,
+          MAX_PATTERN_DIMENSION,
+        );
       }
     }
   }
@@ -2436,9 +2506,9 @@
       !Number.isFinite(cols) ||
       !Number.isFinite(rows) ||
       cols < 2 ||
-      cols > 200 ||
+      cols > MAX_PATTERN_DIMENSION ||
       rows < 2 ||
-      rows > 200
+      rows > MAX_PATTERN_DIMENSION
     ) {
       return null;
     }
@@ -3619,8 +3689,16 @@
   async function processImage({ resetHistory = false, preservePalette = false } = {}) {
     if (!state.image) return;
     if (!preservePalette) cancelColorPick({ redraw: false });
-    state.cols = clamp(Math.round(Number(state.cols) || 32), 2, 200);
-    state.rows = clamp(Math.round(Number(state.rows) || 32), 2, 200);
+    state.cols = clamp(
+      Math.round(Number(state.cols) || 32),
+      2,
+      MAX_PATTERN_DIMENSION,
+    );
+    state.rows = clamp(
+      Math.round(Number(state.rows) || 32),
+      2,
+      MAX_PATTERN_DIMENSION,
+    );
     readCrop();
     saveSettings();
 
@@ -3747,8 +3825,8 @@
 
   function renderPattern() {
     const canvas = elements.patternCanvas;
-    const cols = state.cols;
-    const rows = state.rows;
+    const dimensions = getPatternDimensions();
+    const { cols, rows, scale: patternScale } = dimensions;
     const cell = clamp(Math.floor(3600 / Math.max(cols, rows)), 18, 32);
     const margin = 32;
     const logicalWidth = cols * cell + margin * 2;
@@ -3774,8 +3852,13 @@
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
-        const index = row * cols + col;
-        const paletteIndex = state.cells[index];
+        const paletteIndex = patternCellIndexAt(
+          state.cells,
+          state.cols,
+          patternScale,
+          row,
+          col,
+        );
         const x = margin + col * cell;
         const y = margin + row * cell;
         if (paletteIndex < 0) {
@@ -3838,6 +3921,7 @@
         ctx.fillText(String(row + 1), margin / 2, margin + row * cell + cell / 2);
       }
     }
+    updatePatternScaleControls(dimensions);
   }
 
   function renderOriginal() {
@@ -4634,6 +4718,54 @@
     renderHistoryButtons();
   }
 
+  function updatePatternScaleControls(
+    dimensions = getPatternDimensions(),
+  ) {
+    if (!elements.patternScaleControls) return;
+    const resultView = state.view === "result";
+    elements.patternScaleControls.hidden = !resultView;
+    elements.viewSwitch.classList.toggle("scale-active", resultView);
+    elements.patternScaleValue.value = String(dimensions.scale);
+    elements.patternScaleValue.setAttribute(
+      "aria-label",
+      `当前图纸倍率 ${dimensions.scale}，输出尺寸 ${dimensions.cols} × ${dimensions.rows}`,
+    );
+    elements.patternScaleDown.disabled = dimensions.scale <= 1;
+    elements.patternScaleUp.disabled =
+      dimensions.scale >= dimensions.maxScale;
+    elements.patternScaleDown.title =
+      dimensions.scale <= 1 ? "图纸倍率最低为 ×1" : "减小图纸倍率";
+    elements.patternScaleUp.title =
+      dimensions.scale >= dimensions.maxScale
+        ? `已达到尺寸上限 ${MAX_PATTERN_DIMENSION} × ${MAX_PATTERN_DIMENSION}`
+        : "增大图纸倍率";
+    elements.patternScaleControls.title =
+      `输出 ${dimensions.cols} × ${dimensions.rows}；` +
+      `当前网格最高可设为 ×${dimensions.maxScale}，单边不超过 ${MAX_PATTERN_DIMENSION}`;
+  }
+
+  function setPatternScale(nextScale) {
+    const current = getPatternDimensions();
+    const next = calculatePatternDimensions(
+      state.cols,
+      state.rows,
+      nextScale,
+    );
+    if (next.scale === current.scale) {
+      updatePatternScaleControls(current);
+      return;
+    }
+    state.patternScale = next.scale;
+    state.exportPngGeneration += 1;
+    state.exportPngBlob = null;
+    renderPattern();
+    if (state.view === "result") chooseInitialZoom();
+    updatePatternScaleControls(next);
+    showToast(
+      `图纸倍率 ×${next.scale} · 输出 ${next.cols} × ${next.rows}`,
+    );
+  }
+
   function updateFrameMode() {
     const rectangular = state.frameMode === "rect";
     elements.rectModeButton.classList.toggle("active", rectangular);
@@ -4656,6 +4788,7 @@
     elements.resultTab.setAttribute("aria-selected", String(result));
     elements.originalTab.setAttribute("aria-selected", String(!result));
     elements.zoomValue.value = `${Math.round((result ? state.zoom : state.sourceZoom) * 100)}%`;
+    updatePatternScaleControls();
     if (result) sizeSourceEditor();
     else {
       requestAnimationFrame(() => {
@@ -4690,13 +4823,16 @@
 
   function editCell(event) {
     if (state.view !== "result" || !state.palette.length) return;
+    const dimensions = getPatternDimensions();
     const rect = elements.patternCanvas.getBoundingClientRect();
     const x = ((event.clientX - rect.left) / rect.width) * state.patternLogicalWidth;
     const y = ((event.clientY - rect.top) / rect.height) * state.patternLogicalHeight;
     const col = Math.floor((x - state.margin) / state.renderCellSize);
     const row = Math.floor((y - state.margin) / state.renderCellSize);
-    if (col < 0 || row < 0 || col >= state.cols || row >= state.rows) return;
-    const index = row * state.cols + col;
+    if (col < 0 || row < 0 || col >= dimensions.cols || row >= dimensions.rows) return;
+    const sourceCol = Math.floor(col / dimensions.scale);
+    const sourceRow = Math.floor(row / dimensions.scale);
+    const index = sourceRow * state.cols + sourceCol;
     const previous = state.cells[index];
     const next = state.selectedColor;
     if (previous === next) return;
@@ -5551,7 +5687,14 @@
   }
 
   function getExportLegendColors() {
-    const used = state.palette.filter((color) => color.count > 0);
+    const { scale } = getPatternDimensions();
+    const countMultiplier = scale * scale;
+    const used = state.palette
+      .filter((color) => color.count > 0)
+      .map((color) => ({
+        ...color,
+        count: color.count * countMultiplier,
+      }));
     if (!isBrandPaletteMode()) return used;
     const grouped = new Map();
     used.forEach((color) => {
@@ -5625,7 +5768,12 @@
 
   function makeExportCanvas() {
     const used = getExportLegendColors();
-    const layout = calculateExportLayout(state.cols, state.rows, used.length);
+    const dimensions = getPatternDimensions();
+    const layout = calculateExportLayout(
+      dimensions.cols,
+      dimensions.rows,
+      used.length,
+    );
     const {
       cell,
       margin,
@@ -5646,9 +5794,15 @@
     ctx.fillStyle = "#fffdf8";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    for (let row = 0; row < state.rows; row += 1) {
-      for (let col = 0; col < state.cols; col += 1) {
-        const paletteIndex = state.cells[row * state.cols + col];
+    for (let row = 0; row < dimensions.rows; row += 1) {
+      for (let col = 0; col < dimensions.cols; col += 1) {
+        const paletteIndex = patternCellIndexAt(
+          state.cells,
+          state.cols,
+          dimensions.scale,
+          row,
+          col,
+        );
         const x = margin + col * cell;
         const y = margin + row * cell;
         if (paletteIndex < 0) {
@@ -5673,7 +5827,7 @@
       }
     }
 
-    for (let col = 0; col <= state.cols; col += 1) {
+    for (let col = 0; col <= dimensions.cols; col += 1) {
       ctx.strokeStyle = col % 5 === 0 ? "rgba(25,25,22,.7)" : "rgba(25,25,22,.22)";
       ctx.lineWidth = col % 5 === 0 ? 1.5 : 1;
       const x = margin + col * cell + 0.5;
@@ -5682,7 +5836,7 @@
       ctx.lineTo(x, margin + gridHeight);
       ctx.stroke();
     }
-    for (let row = 0; row <= state.rows; row += 1) {
+    for (let row = 0; row <= dimensions.rows; row += 1) {
       ctx.strokeStyle = row % 5 === 0 ? "rgba(25,25,22,.7)" : "rgba(25,25,22,.22)";
       ctx.lineWidth = row % 5 === 0 ? 1.5 : 1;
       const y = margin + row * cell + 0.5;
@@ -5701,7 +5855,11 @@
     ctx.fillStyle = "#70746c";
     ctx.font = `${Math.round(12 * legendScale)}px system-ui`;
     ctx.fillText(
-      `${state.cols} × ${state.rows} · ${state.cells.filter((cellIndex) => cellIndex >= 0).length} 颗${
+      `${dimensions.cols} × ${dimensions.rows} · ${
+        state.cells.filter((cellIndex) => cellIndex >= 0).length *
+        dimensions.scale *
+        dimensions.scale
+      } 颗${
         isBrandPaletteMode()
           ? ` · ${getSelectedBeadPalette()?.brand || ""} ${getSelectedBeadPalette()?.series || ""}`
           : " · 无品牌识别色"
@@ -5802,12 +5960,25 @@
   }
 
   function exportCsv() {
+    const dimensions = getPatternDimensions();
+    const exportColors = getExportLegendColors();
     const rows = [];
-    rows.push(["行/列", ...Array.from({ length: state.cols }, (_, index) => index + 1)].join(","));
-    for (let row = 0; row < state.rows; row += 1) {
+    rows.push(
+      [
+        "行/列",
+        ...Array.from({ length: dimensions.cols }, (_, index) => index + 1),
+      ].join(","),
+    );
+    for (let row = 0; row < dimensions.rows; row += 1) {
       const values = [row + 1];
-      for (let col = 0; col < state.cols; col += 1) {
-        const cell = state.cells[row * state.cols + col];
+      for (let col = 0; col < dimensions.cols; col += 1) {
+        const cell = patternCellIndexAt(
+          state.cells,
+          state.cols,
+          dimensions.scale,
+          row,
+          col,
+        );
         values.push(
           cell < 0 ? "" : patternColorLabel(state.palette[cell]),
         );
@@ -5818,7 +5989,7 @@
     if (isBrandPaletteMode()) {
       const palette = getSelectedBeadPalette();
       rows.push("图纸标记,品牌,色表,色号,名称,HEX,数量");
-      getExportLegendColors().forEach((color) => {
+      exportColors.forEach((color) => {
         rows.push(
           [
             color.name,
@@ -5835,15 +6006,13 @@
       });
     } else {
       rows.push("图纸标记,颜色标注,HEX,数量");
-      state.palette
-        .filter((color) => color.count)
-        .forEach((color) =>
-          rows.push(
-            [color.name, color.code, rgbToHex(color), color.count]
-              .map(csvEscape)
-              .join(","),
-          ),
-        );
+      exportColors.forEach((color) =>
+        rows.push(
+          [color.name, color.code, rgbToHex(color), color.count]
+            .map(csvEscape)
+            .join(","),
+        ),
+      );
     }
     void finishBlobExport(
       new Blob([`\uFEFF${rows.join("\r\n")}`], { type: "text/csv;charset=utf-8" }),
@@ -5855,14 +6024,20 @@
   function exportJson() {
     const beadPalette = getSelectedBeadPalette();
     const activeScheme = getActiveMappingScheme();
+    const dimensions = getPatternDimensions();
+    const countMultiplier = dimensions.scale * dimensions.scale;
     const data = {
       format: "dougao-pattern",
-      version: 3,
+      version: 4,
       colorModelVersion: 2,
       name: state.fileName,
-      width: state.cols,
-      height: state.rows,
-      totalBeads: state.cells.filter((cell) => cell >= 0).length,
+      width: dimensions.cols,
+      height: dimensions.rows,
+      patternScale: dimensions.scale,
+      sourceWidth: state.cols,
+      sourceHeight: state.rows,
+      totalBeads:
+        state.cells.filter((cell) => cell >= 0).length * countMultiplier,
       beadPalette: beadPalette
         ? {
             id: beadPalette.id,
@@ -5903,7 +6078,7 @@
           targetName: color.targetName || null,
           annotation: isBrandPaletteMode() ? null : color.code,
           hex: rgbToHex(color),
-          count: color.count,
+          count: color.count * countMultiplier,
         }))
         .filter((color) => color.count),
       purchasePalette: getExportLegendColors().map((color) => ({
@@ -5913,9 +6088,15 @@
         hex: rgbToHex(color),
         count: color.count,
       })),
-      cells: Array.from({ length: state.rows }, (_, row) =>
-        Array.from({ length: state.cols }, (_, col) => {
-          const cell = state.cells[row * state.cols + col];
+      cells: Array.from({ length: dimensions.rows }, (_, row) =>
+        Array.from({ length: dimensions.cols }, (_, col) => {
+          const cell = patternCellIndexAt(
+            state.cells,
+            state.cols,
+            dimensions.scale,
+            row,
+            col,
+          );
           return cell < 0
             ? null
             : patternColorLabel(state.palette[cell]);
@@ -5973,8 +6154,8 @@
   function markGridDraftInvalid(input) {
     input.classList.add("draft-invalid");
     input.setAttribute("aria-invalid", "true");
-    input.title = `请输入 ${input.min || 2}–${input.max || 200} 之间的整数；离开输入框后会自动修正。`;
-    elements.detectHint.textContent = `当前输入尚未生效；请输入 ${input.min || 2}–${input.max || 200} 之间的整数。`;
+    input.title = `请输入 ${input.min || 2}–${input.max || MAX_PATTERN_DIMENSION} 之间的整数；离开输入框后会自动修正。`;
+    elements.detectHint.textContent = `当前输入尚未生效；请输入 ${input.min || 2}–${input.max || MAX_PATTERN_DIMENSION} 之间的整数。`;
   }
 
   function applyGridValues() {
@@ -5988,7 +6169,7 @@
     const raw = input.value.trim();
     const numeric = Number(raw);
     const min = Number(input.min) || 2;
-    const max = Number(input.max) || 200;
+    const max = Number(input.max) || MAX_PATTERN_DIMENSION;
     if (
       raw === "" ||
       !Number.isFinite(numeric) ||
@@ -6011,7 +6192,7 @@
     const raw = input.value.trim();
     const numeric = Number(raw);
     const min = Number(input.min) || 2;
-    const max = Number(input.max) || 200;
+    const max = Number(input.max) || MAX_PATTERN_DIMENSION;
     const committed =
       raw === "" || !Number.isFinite(numeric)
         ? gridValueForInput(input)
@@ -6030,7 +6211,7 @@
     const input = document.getElementById(targetId);
     if (!input) return;
     const min = Number(input.min) || 2;
-    const max = Number(input.max) || 200;
+    const max = Number(input.max) || MAX_PATTERN_DIMENSION;
     const numeric = Number(input.value);
     const current =
       input.value.trim() !== "" && Number.isFinite(numeric)
@@ -6536,6 +6717,12 @@
     });
     elements.undoButton.addEventListener("click", undo);
     elements.redoButton.addEventListener("click", redo);
+    elements.patternScaleDown.addEventListener("click", () => {
+      setPatternScale(state.patternScale - 1);
+    });
+    elements.patternScaleUp.addEventListener("click", () => {
+      setPatternScale(state.patternScale + 1);
+    });
     elements.zoomOut.addEventListener("click", () => {
       if (state.view === "result") updateZoom(state.zoom - 0.25);
       else updateSourceZoom(state.sourceZoom - 0.25);
@@ -6727,6 +6914,8 @@
   }
 
   function init() {
+    elements.gridCols.max = String(MAX_PATTERN_DIMENSION);
+    elements.gridRows.max = String(MAX_PATTERN_DIMENSION);
     restoreSettings();
     populateBeadPaletteSelect();
     const paletteErrors = beadPaletteApi?.validate?.() || [];
@@ -6766,7 +6955,10 @@
   }
 
   const coreApi = Object.freeze({
+    MAX_PATTERN_DIMENSION,
     clamp,
+    calculatePatternDimensions,
+    patternCellIndexAt,
     median,
     extractDominantCellSample,
     calculateCornerMagnifierPosition,

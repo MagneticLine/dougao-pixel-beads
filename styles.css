@@ -66,7 +66,7 @@ canvas:focus-visible {
   display: flex;
   align-items: center;
   min-height: 76px;
-  padding: 12px max(24px, calc((100vw - 1440px) / 2));
+  padding: 0 max(24px, calc((100vw - 1440px) / 2));
   border-bottom: 1px solid rgba(79, 75, 65, 0.13);
   background: rgba(246, 241, 231, 0.88);
   backdrop-filter: blur(18px);
@@ -2150,33 +2150,70 @@ body.editing main {
   justify-content: space-between;
 }
 
+.view-switch {
+  --result-tab-width: 64px;
+  --original-tab-width: 68px;
+  display: grid;
+  padding: 4px;
+  border: 1px solid rgba(69, 63, 51, 0.07);
+  border-radius: 11px;
+  background: linear-gradient(180deg, #efede7 0%, #e7e3da 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(49, 43, 32, 0.04);
+  grid-template-columns: var(--result-tab-width) var(--original-tab-width);
+}
+
+.view-switch.scale-active {
+  --result-tab-width: 154px;
+  --original-tab-width: 64px;
+}
+
 .view-tabs {
-  display: flex;
-  padding: 3px;
-  border-radius: 9px;
-  background: #ece9e1;
+  z-index: 1;
+  display: grid;
+  grid-row: 1;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--result-tab-width) var(--original-tab-width);
 }
 
 .view-tabs button {
-  min-width: 64px;
-  height: 30px;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--muted);
   background: transparent;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
 }
 
-.view-tabs button.active {
+#resultTab {
+  grid-column: 1;
+}
+
+#originalTab {
+  grid-column: 2;
+}
+
+.view-tabs button.active,
+.view-switch.scale-active #resultTab {
   color: var(--ink);
   background: white;
   box-shadow: 0 2px 7px rgba(34, 31, 25, 0.1);
 }
 
+.view-switch.scale-active #resultTab {
+  padding: 0 101px 0 13px;
+  text-align: left;
+}
+
 .toolbar-actions {
   display: flex;
+  margin-left: auto;
   align-items: center;
 }
 
@@ -2188,6 +2225,95 @@ body.editing main {
 
 .zoom-controls:hover {
   background: rgba(232, 228, 220, 0.42);
+}
+
+.pattern-scale-controls {
+  z-index: 2;
+  display: flex;
+  height: 24px;
+  margin-right: 5px;
+  gap: 3px;
+  align-items: center;
+  justify-content: flex-end;
+  align-self: center;
+  justify-self: end;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.pattern-scale-controls[hidden] {
+  display: none;
+}
+
+.pattern-scale-label {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.pattern-scale-controls output {
+  width: 24px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+}
+
+.pattern-scale-controls button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(76, 69, 57, 0.28);
+  border-radius: 7px;
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  place-items: center;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 100ms ease;
+}
+
+#patternScaleUp {
+  border-color: rgba(201, 68, 48, 0.48);
+  color: #8d2f20;
+  background: transparent;
+}
+
+.pattern-scale-controls button:hover {
+  border-color: rgba(50, 45, 37, 0.54);
+  background: transparent;
+  box-shadow: none;
+}
+
+#patternScaleUp:hover {
+  border-color: rgba(173, 52, 34, 0.78);
+  background: transparent;
+}
+
+.pattern-scale-controls button:active {
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+.pattern-scale-controls button:disabled {
+  cursor: default;
+  border-color: rgba(76, 69, 57, 0.16);
+  color: #9d968b;
+  background: transparent;
+  opacity: 1;
+  box-shadow: none;
+  transform: none;
 }
 
 .toolbar-actions button {
@@ -3678,6 +3804,25 @@ body.editing main {
   }
 }
 
+@media (min-width: 681px) and (max-width: 760px) {
+  .preview-toolbar {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .toolbar-actions button {
+    width: 26px;
+  }
+
+  .toolbar-actions output {
+    width: 38px;
+  }
+
+  .toolbar-actions .divider {
+    display: none;
+  }
+}
+
 @media (hover: none) and (pointer: coarse) {
   .hero-stage .upload-card {
     cursor: pointer;
@@ -3795,7 +3940,7 @@ body.editing main {
   .topbar {
     position: static;
     min-height: 64px;
-    padding: 10px 16px;
+    padding: 0 16px;
   }
 
   .brand-mark {
@@ -4061,7 +4206,10 @@ body.editing main {
     width: 100%;
     min-height: 44px;
     padding: 0 9px;
+    column-gap: 4px;
+    flex-wrap: wrap;
     order: 1;
+    row-gap: 0;
   }
 
   .calibration-bar {
@@ -4593,6 +4741,43 @@ body.editing main {
   }
 }
 
+@media (max-width: 440px) {
+  .view-switch {
+    --result-tab-width: 56px;
+    --original-tab-width: 56px;
+  }
+
+  .view-switch.scale-active {
+    --result-tab-width: 146px;
+    --original-tab-width: 56px;
+  }
+
+  .view-switch.scale-active #resultTab {
+    padding: 0 96px 0 10px;
+  }
+
+  .pattern-scale-controls button {
+    width: 22px;
+    height: 22px;
+  }
+
+  .pattern-scale-controls {
+    gap: 2px;
+  }
+
+  .toolbar-actions button {
+    width: 28px;
+  }
+
+  .toolbar-actions output {
+    width: 38px;
+  }
+
+  .toolbar-actions .divider {
+    display: none;
+  }
+}
+
 @media (max-width: 420px) {
   .privacy-pill {
     max-width: 132px;
@@ -4640,22 +4825,6 @@ body.editing main {
   .palette-add-button,
   .palette-reset-button {
     min-height: 42px;
-  }
-
-  .view-tabs button {
-    min-width: 56px;
-  }
-
-  .toolbar-actions button {
-    width: 28px;
-  }
-
-  .toolbar-actions output {
-    width: 38px;
-  }
-
-  .toolbar-actions .divider {
-    display: none;
   }
 
   .export-options {
@@ -4719,6 +4888,28 @@ body.editing main {
     padding-right: 7px;
     padding-left: 7px;
     font-size: 10px;
+  }
+
+  .view-switch {
+    --result-tab-width: 52px;
+    --original-tab-width: 52px;
+  }
+
+  .view-switch.scale-active {
+    --result-tab-width: 138px;
+    --original-tab-width: 50px;
+  }
+
+  .view-switch.scale-active #resultTab {
+    padding: 0 92px 0 9px;
+  }
+
+  .toolbar-actions button {
+    width: 25px;
+  }
+
+  .toolbar-actions output {
+    width: 36px;
   }
 
   .live-pattern-preview {
