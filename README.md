@@ -2,6 +2,13 @@
 
 把经过缩放、压缩或轻微模糊的像素图，以及带透视和反光的实物拼豆照片，整理成网格明确、颜色稳定、可以直接照着制作的拼豆图纸。
 
+## 项目记录
+
+- [版本迭代记录](CHANGELOG.md)
+- [品牌色表与颜色映射改造计划](docs/color-system-redesign-plan.md)
+- [统一自动网格识别研究](docs/recognition-algorithm.md)
+- [识别样本自愿贡献规划](docs/recognition-data-contribution-plan.md)
+
 ## 特点
 
 - 纯静态网页，不需要数据库或应用服务器。
