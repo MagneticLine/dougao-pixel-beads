@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v69.webmanifest" />
-    <link rel="stylesheet" href="./styles-v69.css" />
+    <link rel="manifest" href="./manifest-v70.webmanifest" />
+    <link rel="stylesheet" href="./styles-v70.css" />
   </head>
   <body>
     <header class="topbar">
@@ -141,8 +141,8 @@
               <article>
                 <span class="capability-index">03</span>
                 <h3>抗干扰稳定取色</h3>
-                <p>减少文字、孔洞、反光和压缩边缘的影响，并可合并近色、吸色和修改色号。</p>
-                <small>颜色清理 · 人工匹配 · 用量统计</small>
+                <p>减少文字、孔洞、反光和压缩边缘的影响，并可选择品牌色表、比较配色方案和锁定色号。</p>
+                <small>颜色清理 · 品牌匹配 · 用量统计</small>
               </article>
               <article>
                 <span class="capability-index">04</span>
@@ -168,7 +168,7 @@
         </section>
 
         <footer class="site-version" aria-label="当前版本">
-          <span>豆稿 <b>v69</b></span>
+          <span>豆稿 <b>v70</b></span>
           <span>无需登录 · 图片仅在本机处理</span>
         </footer>
       </section>
@@ -305,8 +305,33 @@
                 </span>
               </header>
               <div class="section-body">
+                <div class="color-system-controls">
+                  <label class="color-system-field">
+                    <span>使用的拼豆色表</span>
+                    <select id="beadPaletteSelect">
+                      <option value="none">无品牌 · 保留识别色</option>
+                    </select>
+                  </label>
+                  <label class="color-system-field" id="mappingSchemeField" hidden>
+                    <span>自动匹配方案</span>
+                    <select id="mappingSchemeSelect"></select>
+                  </label>
+                  <p class="mapping-diagnostics" id="mappingDiagnostics" hidden></p>
+                </div>
+                <p class="palette-source-notice" id="paletteSourceNotice" hidden>
+                  色号和 RGB 来自 MIT 许可的社区项目
+                  <a href="https://github.com/maxcleme/beadcolors" target="_blank" rel="noreferrer">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49 0-.24-.01-1.04-.01-1.89-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .08 1.53 1.06 1.53 1.06.89 1.57 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96a9.3 9.3 0 0 1 2.5.35c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.59.69.49A10.23 10.23 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z"
+                      />
+                    </svg>
+                    BeadColors
+                  </a>
+                  的固定快照，并非品牌官方数字色值。
+                </p>
                 <p class="palette-summary" id="paletteSummary">算法识别完成后，可在这里修正图纸颜色和原图匹配关系。</p>
-                <div class="palette-guide" aria-hidden="true">
+                <div class="palette-guide" id="paletteGuide" aria-hidden="true">
                   <span>图纸颜色</span>
                   <span>匹配的原图颜色</span>
                 </div>
@@ -408,6 +433,21 @@
       <p>拖动标题栏可在网页内移动 · 松开校准后更新</p>
     </aside>
 
+    <aside
+      id="sourceSamplePreview"
+      class="source-sample-preview"
+      role="tooltip"
+      aria-hidden="true"
+      hidden
+    >
+      <canvas id="sourceSampleCanvas" aria-label="原图颜色代表格局部放大"></canvas>
+      <div>
+        <b id="sourceSampleTitle">原图取样</b>
+        <span id="sourceSampleMeta">—</span>
+        <small id="sourceSampleHint">画面中央为这项颜色的代表格</small>
+      </div>
+    </aside>
+
     <dialog id="cropDialog" class="crop-dialog" aria-labelledby="cropDialogTitle">
       <form method="dialog" class="crop-sheet">
         <header class="crop-head">
@@ -456,7 +496,7 @@
                   <li><b>先在大图上框边缘。</b>“矩形”模式适合绝大多数图片；只有明显透视时才切到“自由四角”。</li>
                   <li><b>再看网格和水平。</b>滚轮调整行列数，拖动原图下方的旋转滑杆，让格线穿过每颗豆之间的缝隙。</li>
                   <li><b>然后看颜色。</b>实物照片会避开中心孔和反光取色；颜色太多时提高“近似色合并”。</li>
-                  <li><b>最后修正。</b>在颜色表改图纸用色和色号，吸取或拖动原图颜色重新匹配；误操作可一键重置。</li>
+                  <li><b>最后修正。</b>在颜色表改图纸用色和色号，按住原图识别色色块可查看取样位置；误操作可一键重置。</li>
         </ol>
         <div class="notice">处理全程发生在你的浏览器里。刷新或关闭页面后，原图和图纸不会被保存在服务器。</div>
         <button class="primary-button full" value="close">知道了</button>
@@ -536,8 +576,31 @@
       </form>
     </dialog>
 
+    <dialog id="beadColorDialog" class="bead-color-dialog" aria-labelledby="beadColorDialogTitle">
+      <form method="dialog" class="bead-color-sheet">
+        <header class="bead-color-head">
+          <span>
+            <small>人工指定品牌色</small>
+            <b id="beadColorDialogTitle">选择色号</b>
+          </span>
+          <button id="beadColorClose" type="button" aria-label="关闭品牌色选择器">×</button>
+        </header>
+        <label class="bead-color-search">
+          <span>搜索色号或英文名称</span>
+          <input id="beadColorSearch" type="search" autocomplete="off" placeholder="例如 C4、Sky Blue" />
+        </label>
+        <div class="bead-color-list" id="beadColorList" role="listbox" aria-label="品牌色号"></div>
+        <footer class="bead-color-foot">
+          <span id="beadColorCount">—</span>
+          <button id="beadColorCancel" type="button">取消</button>
+        </footer>
+      </form>
+    </dialog>
+
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./app-v69.js"></script>
+    <script src="./bead-palettes-v70.js"></script>
+    <script src="./color-matching-core-v70.js"></script>
+    <script src="./app-v70.js"></script>
   </body>
 </html>

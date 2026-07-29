@@ -64,10 +64,11 @@
 | 品牌或数据集 | 色号与系列依据 | 计算色值依据 | 当前结论 |
 | --- | --- | --- | --- |
 | MARD 221 | 暂未找到可验证的品牌官方下载页；使用多方社区色卡交叉核验 | `maxcleme/beadcolors` 的 MIT 数据 | 首个落地色表，界面标注“社区近似色值” |
-| MARD 291 | 与 MARD 221 相同，额外包含珠光、荧光、透明、夜光等系列 | `maxcleme/beadcolors` 的 MIT 数据 | 作为扩展色表；特殊效果色默认不参与普通自动匹配 |
-| Hama Midi | Hama 官方 2026 色卡 | 开放数据，逐项核对官方新增和停产色 | 官方已出现 120-122，不能直接照搬目前只有 92 条的社区表 |
-| Artkal S/C | Artkal 官方色卡下载页 | 开放数据，按系列补齐并核验 | 官方当前颜色数量高于现有社区数据，必须先补全 |
-| Perler | Perler 官方网站和各地区官方经销商 | 开放数据，记录地区差异 | 不建立一个虚假的“全球唯一完整表”，色表必须带地区或版本 |
+| MARD 291 | 与 MARD 221 相同，额外包含珠光、荧光、透明、夜光等系列 | `maxcleme/beadcolors` 的 MIT 数据 | 作为扩展色表；上游缺少可靠材质字段，当前不伪造自动筛选 |
+| Hama Midi/Mini/Maxi | `maxcleme/beadcolors` 的 MIT 数据 | 同左 | 本轮一起加入，明确表示为 BeadColors 社区数据快照 |
+| Artkal A/C/M/R/S | `maxcleme/beadcolors` 的 MIT 数据 | 同左 | 本轮一起加入，系列和豆子尺寸分别展示 |
+| Perler/Mini/Caps | `maxcleme/beadcolors` 的 MIT 数据 | 同左 | 本轮一起加入，不宣称覆盖品牌在所有地区的当前完整目录 |
+| Nabbi、Yant | `maxcleme/beadcolors` 的 MIT 数据 | 同左 | 作为其他可选拼豆色表一起提供 |
 
 主要参考入口：
 
@@ -75,6 +76,8 @@
 - Hama 官方色卡：<https://hama.dk/en/pages/colour-chart>
 - Artkal 官方色卡：<https://www.artkalbead.com/artkal-beads1/>
 - Perler 日本官方经销商色表：<https://www.kawada-toys.com/brand/perlerbeads/colorlist/>
+
+v70 的直接数据来源统一为 BeadColors。品牌选择区域显示 GitHub 图标、项目链接、MIT 许可和“社区色表，非品牌官方数据”说明。官方链接只作为后续核验资料，不阻塞、也不混入当前数据来源声明。
 
 ### MARD 的现实结论
 
@@ -92,7 +95,7 @@
 
 因此采用以下处理：
 
-- MARD 221 作为国内用户的第一批默认品牌色表；
+- 无品牌模式作为初始默认，MARD 221 作为品牌列表中的首个选项；
 - MARD 291 使用同一份 MIT 数据生成，作为可选扩展色表；
 - 色号体系与 RGB 数据都记录来源；
 - 界面明确说明屏幕色仅用于近似匹配，采购以色号为准；
@@ -107,7 +110,8 @@
 - 若只有官方图片或 PDF，研究其色彩配置、压缩和印刷来源后再决定是否能用作辅助校验；
 - 在统一光源、白平衡、曝光和颜色校准条件下制作实物豆子测色集；
 - 比较社区 RGB、官方视觉材料和实物测色之间的系统偏移与逐色误差；
-- 等 Hama、Artkal、Perler 的社区数据补齐并通过官方色号集合核验后，再加入主应用。
+- 核对 Hama、Artkal、Perler 等社区色表与品牌当前目录的差异，并在未来以新版本更新，不阻塞本轮接入。
+- 评估帮助 BeadColors 补充数据、改进版本管理或建立 GitHub Release。
 
 ### 数据引入流程
 
@@ -115,25 +119,46 @@
 
 1. 在数据来源清单登记网址、发布日期或页面年份、访问日期、许可和用途。
 2. 固定开放数据的上游提交版本，不跟随上游自动更新。
-3. 将数据规范化为项目自己的 JSON 结构。
+3. 将原始数据保存为可审计的本地固定快照，并在读取时规范化为项目自己的对象结构。
 4. 检查色号唯一性、RGB 范围、系列数量、缺失字段和重复颜色。
 5. 将颜色数量与官方页面逐项核对，记录缺失、停产和地区差异。
 6. 抽查每个系列的浅色、中间色、深色和特殊色。
 7. 更新第三方数据声明、测试和版本迭代记录。
 
+### 上游依赖与自动更新策略
+
+BeadColors 当前没有 GitHub Release 或稳定版本标签，主要通过 `master` 分支维护。Raw GitHub 允许跨域请求，但豆稿不在用户浏览器运行时直接获取远端最新数据：
+
+- 当前 Content Security Policy 只允许连接同源；
+- 运行时依赖 GitHub 会破坏离线使用；
+- 国内网络对 GitHub 和 Raw GitHub 的访问不够稳定；
+- 上游无提示修改会让同一个工程在不同日期得到不同色号；
+- Service Worker 难以同时保证最新数据、离线回退和工程可复现性。
+
+采用“固定快照 + 更新检查”的依赖方式：
+
+1. 将选定上游提交中的原始 CSV 固定到 `bead-palettes.js`，连同来源提交 SHA 一起提交到豆稿仓库。
+2. Cloudflare Pages 始终构建仓库内已经审核的快照，不在构建时盲目跟随 `master`。
+3. `npm run check:beadcolors` 比较本地固定提交和上游 `master`，只报告差异，不写文件。
+4. 手动触发及每周定期运行的 GitHub Actions 执行同一检查。
+5. 发现更新后，由维护者人工检查色号新增、删除、RGB 变化、许可和测试结果。
+6. 审核通过后再更新本地快照、数量断言和 revision；不由 CI 自动修改生产分支。
+
+如果 BeadColors 以后发布正式 Release，更新脚本优先跟踪 Release tag；在此之前使用精确 commit SHA，不使用浮动的 `master` URL作为生产数据版本。
+
 ## 色表数据结构
 
-建议目录：
+当前落地结构：
 
 ```text
-data/
-  palettes/
-    manifest.json
-    mard-221.json
-    mard-291.json
-    hama-midi-2026.json
-  sources.json
-  THIRD_PARTY_NOTICES.md
+bead-palettes.js
+color-matching-core.js
+THIRD_PARTY_NOTICES.md
+scripts/
+  check-beadcolors.mjs
+tests/
+  bead-palettes.test.mjs
+  color-matching-core.test.mjs
 ```
 
 色表级字段：
@@ -205,11 +230,11 @@ locked        是否禁止自动重算覆盖
 
 - 完成术语安全修复；
 - 建立色表 schema、来源清单和校验测试；
-- 引入 MARD 221，并保留 MARD 291 扩展入口；
-- 在颜色调整模块增加“无品牌 / MARD 221 / MARD 291”选择；
+- 引入 BeadColors 中适用于拼豆的 MARD、Hama、Artkal、Perler、Nabbi 和 Yant 色表；
+- 在颜色调整模块增加“无品牌”和按品牌、系列、尺寸组织的色表选择；
 - 无品牌模式完整保持当前本色工作流；
 - 工程数据和所有导出格式区分图纸标记、识别色和品牌色号；
-- 在界面中展示数据来源、版本与“屏幕近似色”说明。
+- 在界面中用 GitHub 图标展示 BeadColors 来源、版本、MIT 许可与“社区近似色”说明。
 
 验收条件：
 
@@ -222,6 +247,8 @@ locked        是否禁止自动重算覆盖
 ## 阶段二：颜色匹配逻辑
 
 拟定版本：v71。
+
+详细实现方案见《[品牌颜色匹配技术设计](color-matching-technical-design.md)》。
 
 ### 基线算法
 
@@ -333,7 +360,7 @@ locked        是否禁止自动重算覆盖
 2. `CHANGELOG.md` 中的用户可感知变化；
 3. 数据来源和上游版本；
 4. 自动测试与人工验证结果；
-5. 独立的本地提交；
+5. 一个阶段完成并经用户验收后再做本地提交；
 6. 用户确认后再推送发布。
 
 拟定迭代：
@@ -358,5 +385,6 @@ locked        是否禁止自动重算覆盖
 - 决定 MARD 221 首先落地，但明确标注社区近似色值；
 - 确认 MIT 数据包含结构完整的 MARD 221/291 色号与 RGB，v70 直接采用并固定上游版本；
 - 决定官方图片、PDF 取色和实物测色后置为 TODO，不阻塞第一版品牌色表；
-- 决定 Hama、Artkal、Perler 在数据补齐前不与 MARD 同批上线；
+- 决定 BeadColors 已收录的 MARD、Hama、Artkal、Perler、Nabbi 和 Yant 在 v70 同批提供，并统一声明社区数据来源；
+- 决定不再为中间小步骤频繁提交，只在一个阶段完成并经用户验收后提交；
 - 决定本轮只推进色表、匹配逻辑和取色改色交互三项。

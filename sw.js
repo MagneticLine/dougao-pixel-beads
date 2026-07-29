@@ -1,13 +1,15 @@
-const CACHE_NAME = "dougao-v69";
+const CACHE_NAME = "dougao-v70";
 const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
 const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles-v69.css",
-  "./app-v69.js",
-  "./manifest-v69.webmanifest",
+  "./styles-v70.css",
+  "./bead-palettes-v70.js",
+  "./color-matching-core-v70.js",
+  "./app-v70.js",
+  "./manifest-v70.webmanifest",
   "./recognition/recognition-image-core.mjs?v=64",
   "./recognition/dominant-lattice-core.mjs?v=64",
   "./favicon.svg",

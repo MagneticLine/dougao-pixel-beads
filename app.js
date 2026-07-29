@@ -75,7 +75,13 @@
     colorMerge: $("#colorMerge"),
     mergeValue: $("#mergeValue"),
     keepTransparent: $("#keepTransparent"),
+    beadPaletteSelect: $("#beadPaletteSelect"),
+    mappingSchemeField: $("#mappingSchemeField"),
+    mappingSchemeSelect: $("#mappingSchemeSelect"),
+    mappingDiagnostics: $("#mappingDiagnostics"),
+    paletteSourceNotice: $("#paletteSourceNotice"),
     paletteSummary: $("#paletteSummary"),
+    paletteGuide: $("#paletteGuide"),
     paletteList: $("#paletteList"),
     addPaletteButton: $("#addPaletteButton"),
     resetPaletteButton: $("#resetPaletteButton"),
@@ -83,6 +89,11 @@
     livePatternCanvas: $("#livePatternCanvas"),
     livePreviewMeta: $("#livePreviewMeta"),
     livePreviewToggle: $("#livePreviewToggle"),
+    sourceSamplePreview: $("#sourceSamplePreview"),
+    sourceSampleCanvas: $("#sourceSampleCanvas"),
+    sourceSampleTitle: $("#sourceSampleTitle"),
+    sourceSampleMeta: $("#sourceSampleMeta"),
+    sourceSampleHint: $("#sourceSampleHint"),
     colorPickBanner: $("#colorPickBanner"),
     colorPickLabel: $("#colorPickLabel"),
     cancelColorPickButton: $("#cancelColorPickButton"),
@@ -96,6 +107,13 @@
     colorHexInput: $("#colorHexInput"),
     colorEditorCancel: $("#colorEditorCancel"),
     colorEditorApply: $("#colorEditorApply"),
+    beadColorDialog: $("#beadColorDialog"),
+    beadColorDialogTitle: $("#beadColorDialogTitle"),
+    beadColorClose: $("#beadColorClose"),
+    beadColorSearch: $("#beadColorSearch"),
+    beadColorList: $("#beadColorList"),
+    beadColorCount: $("#beadColorCount"),
+    beadColorCancel: $("#beadColorCancel"),
     resultTab: $("#resultTab"),
     originalTab: $("#originalTab"),
     undoButton: $("#undoButton"),
@@ -156,6 +174,15 @@
     cropView: null,
     cropApplying: false,
     detectedMode: "pixel",
+    sourcePalette: [],
+    sourceCells: [],
+    noBrandDraft: null,
+    selectedPaletteId: "none",
+    selectedPaletteRevision: null,
+    mappingResults: null,
+    activeMappingSchemeId: "coherent",
+    lockedMappingsByPalette: {},
+    beadColorSourceId: "",
     palette: [],
     detectedPaletteCount: 0,
     detectedPaletteSnapshot: [],
@@ -166,8 +193,10 @@
     selectedColor: 0,
     colorPickTarget: -1,
     matchDrag: null,
+    sourceSamplePress: null,
     previewDrag: null,
     previewPosition: null,
+    previewPositionManual: false,
     livePreviewCollapsed: false,
     colorEditorIndex: -1,
     colorEditorPointer: null,
@@ -199,8 +228,18 @@
     denoise: ["关闭", "轻微", "标准", "强力"],
     merge: ["关闭", "轻微", "适中", "明显", "强力"],
   };
+  const SOURCE_SAMPLE_HOLD_MS = 320;
+  const PIXEL_CELL_SAMPLING_PATCHES = [
+    { shiftX: 0, shiftY: 0, offsets: [-0.28, -0.14, 0, 0.14, 0.28] },
+    { shiftX: -0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
+    { shiftX: 0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
+    { shiftX: 0, shiftY: -0.18, offsets: [-0.12, 0, 0.12] },
+    { shiftX: 0, shiftY: 0.18, offsets: [-0.12, 0, 0.12] },
+  ];
   let mobileControlResizeObserver = null;
   let recognitionCorePromise = null;
+  const beadPaletteApi = globalThis.DougaoBeadPalettes || null;
+  const colorMatchingApi = globalThis.DougaoColorMatching || null;
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -258,6 +297,21 @@
     elements.toast.classList.add("show");
     clearTimeout(showToast.timer);
     showToast.timer = setTimeout(() => elements.toast.classList.remove("show"), 2400);
+  }
+
+  function scrollPageToTop({ stabilize = false } = {}) {
+    const reset = () => {
+      window.scrollTo(0, 0);
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    reset();
+    if (!stabilize) return;
+    requestAnimationFrame(() => {
+      reset();
+      requestAnimationFrame(reset);
+    });
   }
 
   function safeShowModal(dialog) {
@@ -338,6 +392,7 @@
           denoise: elements.denoise.value,
           merge: elements.colorMerge.value,
           keepTransparent: elements.keepTransparent.checked,
+          paletteId: state.selectedPaletteId,
         }),
       );
     } catch {
@@ -350,6 +405,12 @@
     if (saved.denoise != null) elements.denoise.value = saved.denoise;
     if (saved.merge != null) elements.colorMerge.value = saved.merge;
     if (saved.keepTransparent != null) elements.keepTransparent.checked = saved.keepTransparent;
+    if (
+      saved.paletteId === "none" ||
+      beadPaletteApi?.getPalette(saved.paletteId)
+    ) {
+      state.selectedPaletteId = saved.paletteId;
+    }
     updateRangeLabels();
   }
 
@@ -1168,6 +1229,7 @@
       return;
     }
     if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+    hideSourceSamplePreview();
     state.image = image;
     state.imageUrl = url;
     state.fileName = file.name.replace(/\.[^.]+$/, "") || "未命名图稿";
@@ -1183,6 +1245,14 @@
     state.recognitionSeed = recognitionSeed;
     state.detectedMode = detectImageKind();
     suggestPhotoFrame();
+    state.sourcePalette = [];
+    state.sourceCells = [];
+    state.noBrandDraft = null;
+    state.selectedPaletteRevision = null;
+    state.mappingResults = null;
+    state.activeMappingSchemeId = "coherent";
+    state.lockedMappingsByPalette = {};
+    state.beadColorSourceId = "";
     state.palette = [];
     state.detectedPaletteCount = 0;
     state.detectedPaletteSnapshot = [];
@@ -1195,6 +1265,7 @@
     state.matchDrag = null;
     state.previewDrag = null;
     state.previewPosition = null;
+    state.previewPositionManual = false;
     state.recognitionCandidates = [];
     state.recognitionCandidateIndex = -1;
     renderRecognitionCandidates();
@@ -1215,7 +1286,7 @@
     updateView();
     syncMobileControlCarousel({ align: true });
     drawSourceThumb();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollPageToTop({ stabilize: true });
     await autoDetect(true, { engine: detectionEngine });
   }
 
@@ -1236,6 +1307,7 @@
       return;
     }
 
+    scrollPageToTop({ stabilize: true });
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.decoding = "async";
@@ -2787,6 +2859,34 @@
     return Math.hypot((a.l - b.l) * lightnessWeight, a.a - b.a, a.b - b.b);
   }
 
+  function cellSamplingGridPoints(col, row, photoMode) {
+    const points = [];
+    if (photoMode) {
+      for (const radius of [0.25, 0.36]) {
+        for (let angleIndex = 0; angleIndex < 16; angleIndex += 1) {
+          const angle = (Math.PI * 2 * angleIndex) / 16;
+          points.push({
+            x: col + 0.5 + Math.cos(angle) * radius,
+            y: row + 0.5 + Math.sin(angle) * radius,
+          });
+        }
+      }
+      return points;
+    }
+
+    for (const { shiftX, shiftY, offsets } of PIXEL_CELL_SAMPLING_PATCHES) {
+      for (const offsetY of offsets) {
+        for (const offsetX of offsets) {
+          points.push({
+            x: col + 0.5 + shiftX + offsetX,
+            y: row + 0.5 + shiftY + offsetY,
+          });
+        }
+      }
+    }
+    return points;
+  }
+
   function sampleCells() {
     const cols = state.cols;
     const rows = state.rows;
@@ -2795,57 +2895,27 @@
     const photoMode = activeSourceMode() === "photo";
     const samples = [];
     const confidences = [];
-    const pixelSamplingPatches = photoMode
-      ? []
-      : [
-          { shiftX: 0, shiftY: 0, offsets: [-0.28, -0.14, 0, 0.14, 0.28] },
-          { shiftX: -0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
-          { shiftX: 0.18, shiftY: 0, offsets: [-0.12, 0, 0.12] },
-          { shiftX: 0, shiftY: -0.18, offsets: [-0.12, 0, 0.12] },
-          { shiftX: 0, shiftY: 0.18, offsets: [-0.12, 0, 0.12] },
-        ];
 
     for (let row = 0; row < rows; row += 1) {
       for (let col = 0; col < cols; col += 1) {
         const colors = [];
-        if (photoMode) {
-          // Hollow beads and glossy highlights make the center unreliable.
-          // Sample two rings around each center and discard luminance extremes.
-          for (const radius of [0.25, 0.36]) {
-            for (let angleIndex = 0; angleIndex < 16; angleIndex += 1) {
-              const angle = (Math.PI * 2 * angleIndex) / 16;
-              const point = viewPointToSource(
-                projectGridPoint(
-                  projector,
-                  col + 0.5 + Math.cos(angle) * radius,
-                  row + 0.5 + Math.sin(angle) * radius,
-                  cols,
-                  rows,
-                ),
-              );
-              colors.push(readSourcePixel(source, point.x, point.y));
-            }
-          }
-        } else {
+        for (const samplePoint of cellSamplingGridPoints(col, row, photoMode)) {
+          const point = viewPointToSource(
+            projectGridPoint(
+              projector,
+              samplePoint.x,
+              samplePoint.y,
+              cols,
+              rows,
+            ),
+          );
+          colors.push(readSourcePixel(source, point.x, point.y));
+        }
+
+        if (!photoMode) {
           // Read most of the safe inner area instead of trusting only the center.
           // Thin labels, anti-aliased glyphs and slightly misplaced grid lines become
           // minority color clusters, while the cell background remains dominant.
-          for (const { shiftX, shiftY, offsets } of pixelSamplingPatches) {
-            for (const offsetY of offsets) {
-              for (const offsetX of offsets) {
-                const point = viewPointToSource(
-                  projectGridPoint(
-                    projector,
-                    col + 0.5 + shiftX + offsetX,
-                    row + 0.5 + shiftY + offsetY,
-                    cols,
-                    rows,
-                  ),
-                );
-                colors.push(readSourcePixel(source, point.x, point.y));
-              }
-            }
-          }
           const dominant = extractDominantCellSample(colors);
           const alpha = dominant.color[3];
           if (
@@ -3076,11 +3146,367 @@
     return palette.map((color) => ({
       ...color,
       lab: { ...color.lab },
+      sourceRgb: color.sourceRgb ? { ...color.sourceRgb } : undefined,
+      candidates: (color.candidates || []).map((candidate) => ({
+        ...candidate,
+        rgb: candidate.rgb ? { ...candidate.rgb } : undefined,
+      })),
       matches: (color.matches || []).map((match) => ({
         ...match,
         lab: { ...match.lab },
       })),
     }));
+  }
+
+  function isBrandPaletteMode() {
+    return state.selectedPaletteId !== "none";
+  }
+
+  function createSourcePalette(palette, cells) {
+    const counts = new Array(palette.length).fill(0);
+    cells.forEach((cell) => {
+      if (cell >= 0 && cell < counts.length) counts[cell] += 1;
+    });
+    return palette.map((color, index) => {
+      const rgb = {
+        r: Math.round(color.r),
+        g: Math.round(color.g),
+        b: Math.round(color.b),
+      };
+      return {
+        id: `source-${String(index + 1).padStart(3, "0")}`,
+        marker: color.name || makeCode(index),
+        ...rgb,
+        rgb,
+        lab: colorMatchingApi?.rgbToLab(rgb) || rgbToLab(rgb),
+        oklab: colorMatchingApi?.rgbToOklab(rgb),
+        count: counts[index],
+      };
+    });
+  }
+
+  function recalculateSourceCounts() {
+    const counts = new Array(state.sourcePalette.length).fill(0);
+    state.sourceCells.forEach((cell) => {
+      if (cell >= 0 && cell < counts.length) counts[cell] += 1;
+    });
+    state.sourcePalette.forEach((color, index) => {
+      color.count = counts[index];
+    });
+  }
+
+  function makeIdentityPaletteFromSource() {
+    return state.sourcePalette.map((source, index) => {
+      const rgb = { r: source.r, g: source.g, b: source.b };
+      return {
+        ...rgb,
+        lab: rgbToLab(rgb),
+        count: source.count,
+        name: source.marker || makeCode(index),
+        marker: source.marker || makeCode(index),
+        code: rgbToHex(rgb),
+        codeCustomized: false,
+        sourceId: source.id,
+        sourceRgb: { ...rgb },
+        mappingMethod: "identity",
+        matches: [{ ...rgb, lab: rgbToLab(rgb) }],
+      };
+    });
+  }
+
+  function captureNoBrandDraft() {
+    if (isBrandPaletteMode() || !state.palette.length) return;
+    state.noBrandDraft = {
+      palette: clonePalette(state.palette),
+      cells: [...state.cells],
+      paletteEdited: state.paletteEdited,
+      selectedColor: state.selectedColor,
+    };
+  }
+
+  function restoreNoBrandDraft() {
+    const draft = state.noBrandDraft;
+    state.palette = draft?.palette?.length
+      ? clonePalette(draft.palette)
+      : makeIdentityPaletteFromSource();
+    state.cells = draft?.cells?.length
+      ? [...draft.cells]
+      : [...state.sourceCells];
+    state.paletteEdited = Boolean(draft?.paletteEdited);
+    state.selectedColor = clamp(
+      draft?.selectedColor || 0,
+      0,
+      Math.max(0, state.palette.length - 1),
+    );
+    state.mappingResults = null;
+    state.selectedPaletteRevision = null;
+    recalculateCounts();
+  }
+
+  function getSelectedBeadPalette() {
+    if (!beadPaletteApi || !isBrandPaletteMode()) return null;
+    return beadPaletteApi.getPalette(state.selectedPaletteId);
+  }
+
+  function getPaletteLocks(paletteId = state.selectedPaletteId) {
+    if (!state.lockedMappingsByPalette[paletteId]) {
+      state.lockedMappingsByPalette[paletteId] = {};
+    }
+    return state.lockedMappingsByPalette[paletteId];
+  }
+
+  function listMappingSchemes() {
+    if (!state.mappingResults) return [];
+    return [
+      state.mappingResults.coherent,
+      state.mappingResults.nearest,
+      ...(state.mappingResults.alternatives || []),
+    ].filter(Boolean);
+  }
+
+  function getActiveMappingScheme() {
+    const schemes = listMappingSchemes();
+    return (
+      schemes.find((scheme) => scheme.id === state.activeMappingSchemeId) ||
+      schemes[0] ||
+      null
+    );
+  }
+
+  function applyActiveMappingScheme({
+    render = true,
+    preserveHistory = false,
+  } = {}) {
+    const scheme = getActiveMappingScheme();
+    if (!scheme) return;
+    state.activeMappingSchemeId = scheme.id;
+    const mappings = new Map(
+      scheme.mappings.map((mapping) => [mapping.sourceId, mapping]),
+    );
+    state.palette = state.sourcePalette.map((source, index) => {
+      const mapping = mappings.get(source.id);
+      const rgb = mapping?.targetRgb || source.rgb;
+      const marker = source.marker || makeCode(index);
+      return {
+        r: rgb.r,
+        g: rgb.g,
+        b: rgb.b,
+        lab: rgbToLab(rgb),
+        count: source.count,
+        name: marker,
+        marker,
+        code: mapping?.targetCode || rgbToHex(rgb),
+        codeCustomized: false,
+        sourceId: source.id,
+        sourceRgb: { ...source.rgb },
+        targetCode: mapping?.targetCode || null,
+        targetName: mapping?.targetName || "",
+        contributor: mapping?.contributor || "",
+        mappingMethod: mapping?.method || "identity",
+        locked: Boolean(mapping?.locked),
+        localDeltaE00: mapping?.localDeltaE00 ?? 0,
+        confidence: mapping?.confidence ?? 1,
+        candidates: (mapping?.candidates || []).map((candidate) => ({
+          ...candidate,
+          rgb: { ...candidate.rgb },
+        })),
+        matches: [
+          {
+            ...source.rgb,
+            lab: rgbToLab(source.rgb),
+          },
+        ],
+      };
+    });
+    state.cells = [...state.sourceCells];
+    state.paletteEdited = Object.keys(getPaletteLocks()).length > 0;
+    state.selectedColor = clamp(
+      state.selectedColor,
+      0,
+      Math.max(0, state.palette.length - 1),
+    );
+    if (!preserveHistory) {
+      state.history = [];
+      state.future = [];
+    }
+    recalculateCounts();
+    if (render) renderAll();
+  }
+
+  function applyBrandMatching({
+    render = true,
+    preserveHistory = false,
+  } = {}) {
+    const palette = getSelectedBeadPalette();
+    if (
+      !palette ||
+      !state.sourcePalette.length ||
+      !colorMatchingApi?.matchPalette
+    ) {
+      state.mappingResults = null;
+      if (render) renderAll();
+      return;
+    }
+    state.selectedPaletteRevision = palette.revision;
+    state.mappingResults = colorMatchingApi.matchPalette({
+      sourceColors: state.sourcePalette,
+      sourceCells: state.sourceCells,
+      cols: state.cols,
+      rows: state.rows,
+      palette: palette.colors,
+      paletteId: palette.id,
+      paletteRevision: palette.revision,
+      lockedMappings: getPaletteLocks(palette.id),
+    });
+    if (
+      !listMappingSchemes().some(
+        (scheme) => scheme.id === state.activeMappingSchemeId,
+      )
+    ) {
+      state.activeMappingSchemeId = "coherent";
+    }
+    applyActiveMappingScheme({ render, preserveHistory });
+  }
+
+  function selectBeadPalette(paletteId) {
+    const nextId =
+      paletteId === "none" || beadPaletteApi?.getPalette(paletteId)
+        ? paletteId
+        : "none";
+    if (nextId === state.selectedPaletteId) return;
+    if (!isBrandPaletteMode()) captureNoBrandDraft();
+    cancelColorPick({ redraw: false });
+    state.selectedPaletteId = nextId;
+    state.activeMappingSchemeId = "coherent";
+    state.selectedColor = 0;
+    state.history = [];
+    state.future = [];
+    saveSettings();
+    if (isBrandPaletteMode()) applyBrandMatching();
+    else {
+      restoreNoBrandDraft();
+      renderAll();
+    }
+  }
+
+  function setManualBrandMapping(sourceId, targetCode) {
+    const palette = getSelectedBeadPalette();
+    if (
+      !palette ||
+      !state.sourcePalette.some((source) => source.id === sourceId) ||
+      !palette.colors.some((color) => color.code === targetCode)
+    ) {
+      return;
+    }
+    getPaletteLocks(palette.id)[sourceId] = targetCode;
+    applyBrandMatching();
+    const marker =
+      state.sourcePalette.find((source) => source.id === sourceId)?.marker ||
+      sourceId;
+    showToast(`${marker} 已指定并锁定为 ${targetCode}`);
+  }
+
+  function toggleBrandMappingLock(sourceId) {
+    const color = state.palette.find((entry) => entry.sourceId === sourceId);
+    if (!color?.targetCode) return;
+    const locks = getPaletteLocks();
+    if (locks[sourceId]) {
+      delete locks[sourceId];
+      applyBrandMatching();
+      showToast(`${color.name} 已恢复自动匹配`);
+    } else {
+      locks[sourceId] = color.targetCode;
+      applyBrandMatching();
+      showToast(`${color.name} · ${color.targetCode} 已锁定`);
+    }
+  }
+
+  function closeBeadColorDialog() {
+    state.beadColorSourceId = "";
+    elements.beadColorSearch.value = "";
+    safeCloseModal(elements.beadColorDialog);
+  }
+
+  function renderBeadColorOptions() {
+    const palette = getSelectedBeadPalette();
+    const source = state.sourcePalette.find(
+      (color) => color.id === state.beadColorSourceId,
+    );
+    elements.beadColorList.replaceChildren();
+    if (!palette || !source || !colorMatchingApi) {
+      elements.beadColorCount.textContent = "没有可用色表";
+      return;
+    }
+    const query = elements.beadColorSearch.value.trim().toUpperCase();
+    const currentCode = state.palette.find(
+      (color) => color.sourceId === source.id,
+    )?.targetCode;
+    const colors = palette.colors
+      .filter((color) => {
+        if (!query) return true;
+        return (
+          color.code.toUpperCase().includes(query) ||
+          color.name.toUpperCase().includes(query)
+        );
+      })
+      .map((color) => ({
+        ...color,
+        deltaE00: colorMatchingApi.deltaE00(
+          source.lab,
+          colorMatchingApi.rgbToLab(color),
+        ),
+      }))
+      .sort(
+        (left, right) =>
+          left.deltaE00 - right.deltaE00 ||
+          colorMatchingApi.compareCodes(left.code, right.code),
+      );
+    const fragment = document.createDocumentFragment();
+    colors.forEach((color) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `bead-color-option${color.code === currentCode ? " current" : ""}`;
+      button.dataset.beadCode = color.code;
+      button.setAttribute("role", "option");
+      button.setAttribute(
+        "aria-selected",
+        String(color.code === currentCode),
+      );
+      const swatch = document.createElement("i");
+      swatch.style.background = colorCss(color);
+      const meta = document.createElement("span");
+      const code = document.createElement("b");
+      code.textContent = color.code;
+      const name = document.createElement("small");
+      name.textContent = `${color.name} · ΔE ${color.deltaE00.toFixed(1)}`;
+      meta.append(code, name);
+      button.append(swatch, meta);
+      fragment.append(button);
+    });
+    if (!colors.length) {
+      const empty = document.createElement("p");
+      empty.className = "bead-color-empty";
+      empty.textContent = "没有匹配的色号，请换个关键词";
+      fragment.append(empty);
+    }
+    elements.beadColorList.append(fragment);
+    elements.beadColorCount.textContent =
+      query
+        ? `找到 ${colors.length} 个色号，按与原图的色差排序`
+        : `${palette.brand} · ${palette.series} · ${colors.length} 个色号，按与原图的色差排序`;
+  }
+
+  function openBeadColorDialog(index) {
+    const color = state.palette[index];
+    const palette = getSelectedBeadPalette();
+    if (!color?.sourceId || !palette) return;
+    state.beadColorSourceId = color.sourceId;
+    elements.beadColorDialogTitle.textContent =
+      `${color.name} · ${palette.brand} ${palette.series}`;
+    elements.beadColorSearch.value = "";
+    renderBeadColorOptions();
+    safeShowModal(elements.beadColorDialog);
+    requestAnimationFrame(() => elements.beadColorSearch.focus());
   }
 
   function nearestColorIndex(color, palette) {
@@ -3204,27 +3630,91 @@
 
     try {
       const { samples, confidences } = sampleCells();
-      const keepingEdits = preservePalette && state.paletteEdited;
+      const keepingEdits =
+        preservePalette && state.paletteEdited && !isBrandPaletteMode();
       const detectedPalette = clusterPalette(samples);
-      const palette = keepingEdits ? state.palette : detectedPalette;
-      if (!palette.length && !keepingEdits) {
+      if (!detectedPalette.length) {
         showToast("裁切区域几乎完全透明，请调整裁切或关闭透明留空");
         return;
       }
-      let cells = samples.map((color) => (color.a ? nearestPaletteMatchIndex(color, palette) : -1));
-      cells = cleanCells(cells, confidences, palette, Number(elements.denoise.value));
+      let detectedCells = samples.map((color) =>
+        color.a
+          ? nearestPaletteMatchIndex(color, detectedPalette)
+          : -1,
+      );
+      detectedCells = cleanCells(
+        detectedCells,
+        confidences,
+        detectedPalette,
+        Number(elements.denoise.value),
+      );
       if (token !== state.processingToken) return;
 
-      state.palette = palette;
+      const previousSourceSignature = state.sourcePalette
+        .map((color) => rgbToHex(color))
+        .join("|");
+      const sourcePalette = createSourcePalette(
+        detectedPalette,
+        detectedCells,
+      );
+      const nextSourceSignature = sourcePalette
+        .map((color) => rgbToHex(color))
+        .join("|");
+      if (
+        previousSourceSignature &&
+        previousSourceSignature !== nextSourceSignature
+      ) {
+        state.lockedMappingsByPalette = {};
+      }
+      state.sourcePalette = sourcePalette;
+      state.sourceCells = [...detectedCells];
       state.detectedPaletteCount = detectedPalette.length;
       state.detectedPaletteSnapshot = clonePalette(detectedPalette);
-      if (!keepingEdits) {
-        state.paletteEdited = false;
-      }
-      state.cells = cells;
+      state.detectedPaletteSnapshot.forEach((color, index) => {
+        color.count = sourcePalette[index]?.count || 0;
+      });
       state.samples = samples;
       state.confidences = confidences;
-      state.selectedColor = clamp(state.selectedColor, 0, Math.max(0, palette.length - 1));
+
+      const automaticPalette = clonePalette(detectedPalette);
+      automaticPalette.forEach((color, index) => {
+        color.count = sourcePalette[index]?.count || 0;
+      });
+      state.noBrandDraft = {
+        palette: automaticPalette,
+        cells: [...detectedCells],
+        paletteEdited: false,
+        selectedColor: 0,
+      };
+
+      if (isBrandPaletteMode()) {
+        applyBrandMatching({ render: false });
+      } else {
+        const palette = keepingEdits ? state.palette : detectedPalette;
+        let cells = keepingEdits
+          ? samples.map((color) =>
+              color.a ? nearestPaletteMatchIndex(color, palette) : -1,
+            )
+          : detectedCells;
+        if (keepingEdits) {
+          cells = cleanCells(
+            cells,
+            confidences,
+            palette,
+            Number(elements.denoise.value),
+          );
+        }
+        state.palette = palette;
+        state.cells = [...cells];
+        if (!keepingEdits) state.paletteEdited = false;
+        recalculateCounts();
+        captureNoBrandDraft();
+      }
+      state.selectedColor = clamp(
+        state.selectedColor,
+        0,
+        Math.max(0, state.palette.length - 1),
+      );
       if (resetHistory) {
         state.history = [];
         state.future = [];
@@ -3246,6 +3736,13 @@
   function textColor(color) {
     const luminance = (color.r * 299 + color.g * 587 + color.b * 114) / 1000;
     return luminance > 150 ? "#242620" : "#ffffff";
+  }
+
+  function patternColorLabel(color) {
+    if (!color) return "";
+    return isBrandPaletteMode() && color.targetCode
+      ? color.targetCode
+      : color.name;
   }
 
   function renderPattern() {
@@ -3294,7 +3791,12 @@
           ctx.font = `700 ${Math.max(8, Math.floor(cell * 0.36))}px Arial, "Microsoft YaHei", sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.name, Math.round(x + cell / 2), Math.round(y + cell / 2));
+          ctx.fillText(
+            patternColorLabel(color),
+            Math.round(x + cell / 2),
+            Math.round(y + cell / 2),
+            cell - 2,
+          );
         } else if (cell >= 10) {
           ctx.fillStyle = textColor(color);
           ctx.globalAlpha = 0.52;
@@ -3350,10 +3852,465 @@
     ctx.drawImage(rectified, 0, 0);
   }
 
+  function populateBeadPaletteSelect() {
+    if (!elements.beadPaletteSelect) return;
+    const current = state.selectedPaletteId;
+    elements.beadPaletteSelect.replaceChildren();
+    const identityOption = document.createElement("option");
+    identityOption.value = "none";
+    identityOption.textContent = "无品牌 · 保留识别色";
+    elements.beadPaletteSelect.append(identityOption);
+    if (!beadPaletteApi) {
+      elements.beadPaletteSelect.disabled = true;
+      return;
+    }
+    const groups = new Map();
+    beadPaletteApi.listPalettes().forEach((palette) => {
+      if (!groups.has(palette.brand)) groups.set(palette.brand, []);
+      groups.get(palette.brand).push(palette);
+    });
+    groups.forEach((palettes, brand) => {
+      const group = document.createElement("optgroup");
+      group.label = brand;
+      palettes.forEach((palette) => {
+        const option = document.createElement("option");
+        option.value = palette.id;
+        option.textContent = `${palette.series} · ${palette.count} 色 · ${palette.beadSize}`;
+        group.append(option);
+      });
+      elements.beadPaletteSelect.append(group);
+    });
+    elements.beadPaletteSelect.value = current;
+  }
+
+  function representativeSourceSample(sourceId) {
+    const sourceIndex = state.sourcePalette.findIndex(
+      (color) => color.id === sourceId,
+    );
+    const source = state.sourcePalette[sourceIndex];
+    if (!source || sourceIndex < 0) return null;
+
+    let occurrences = 0;
+    let best = null;
+    state.sourceCells.forEach((cell, cellIndex) => {
+      if (cell !== sourceIndex) return;
+      occurrences += 1;
+      const sample = state.samples[cellIndex];
+      if (!sample?.a || !sample.lab) return;
+      const confidence = clamp(state.confidences[cellIndex] ?? 0, 0, 1);
+      const distance = colorMatchingApi?.deltaE00
+        ? colorMatchingApi.deltaE00(source.lab, sample.lab)
+        : labDistance(source.lab, sample.lab);
+      const col = cellIndex % state.cols;
+      const row = Math.floor(cellIndex / state.cols);
+      const edgeDistance = Math.min(
+        col,
+        row,
+        state.cols - col - 1,
+        state.rows - row - 1,
+      );
+      const edgePenalty = Math.max(0, 2 - edgeDistance) * 0.25;
+      const score = distance + (1 - confidence) * 7 + edgePenalty;
+      if (
+        !best ||
+        score < best.score - 1e-9 ||
+        (Math.abs(score - best.score) <= 1e-9 && cellIndex < best.cellIndex)
+      ) {
+        best = {
+          source,
+          sourceIndex,
+          sample,
+          confidence,
+          distance,
+          score,
+          cellIndex,
+          col,
+          row,
+        };
+      }
+    });
+
+    return best ? { ...best, occurrences } : null;
+  }
+
+  function sourceSampleViewport(sample) {
+    const visibleCols = Math.min(state.cols, 5.4);
+    const visibleRows = Math.min(state.rows, 5.4);
+    const width = visibleCols / Math.max(1, state.cols);
+    const height = visibleRows / Math.max(1, state.rows);
+    const centerX = (sample.col + 0.5) / Math.max(1, state.cols);
+    const centerY = (sample.row + 0.5) / Math.max(1, state.rows);
+    const left = clamp(centerX - width / 2, 0, 1 - width);
+    const top = clamp(centerY - height / 2, 0, 1 - height);
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+    };
+  }
+
+  function drawSourceSamplePreview(sample) {
+    const canvas = elements.sourceSampleCanvas;
+    const logicalSize = 184;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(logicalSize * dpr);
+    canvas.height = Math.round(logicalSize * dpr);
+    const context = canvas.getContext("2d");
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const checkerSize = 10;
+    for (let y = 0; y < logicalSize; y += checkerSize) {
+      for (let x = 0; x < logicalSize; x += checkerSize) {
+        context.fillStyle =
+          (x / checkerSize + y / checkerSize) % 2 ? "#343633" : "#262825";
+        context.fillRect(x, y, checkerSize, checkerSize);
+      }
+    }
+
+    const viewport = sourceSampleViewport(sample);
+    const localImage = makeRectifiedCanvas(420, viewport);
+    const imageScale = Math.min(
+      logicalSize / Math.max(1, localImage.width),
+      logicalSize / Math.max(1, localImage.height),
+    );
+    const drawWidth = localImage.width * imageScale;
+    const drawHeight = localImage.height * imageScale;
+    const drawX = (logicalSize - drawWidth) / 2;
+    const drawY = (logicalSize - drawHeight) / 2;
+    context.imageSmoothingEnabled = activeSourceMode() === "photo";
+    context.imageSmoothingQuality = "high";
+    context.drawImage(localImage, drawX, drawY, drawWidth, drawHeight);
+
+    elements.sourceSampleTitle.textContent =
+      `${sample.source.marker} · ${rgbToHex(sample.source)}`;
+    elements.sourceSampleMeta.textContent =
+      `第 ${sample.col + 1} 列 · 第 ${sample.row + 1} 行 · ${sample.occurrences} 格中最典型`;
+    elements.sourceSampleHint.textContent =
+      "画面中央是这项颜色的代表格，可查看周围像素与文字";
+  }
+
+  function positionSourceSamplePreview(anchor) {
+    const preview = elements.sourceSamplePreview;
+    const anchorRect = anchor.getBoundingClientRect();
+    const previewRect = preview.getBoundingClientRect();
+    const viewportWidth =
+      document.documentElement.clientWidth || window.innerWidth;
+    const viewportHeight =
+      document.documentElement.clientHeight || window.innerHeight;
+    const margin = 12;
+    const gap = coarsePointerQuery.matches ? 20 : 14;
+    let left;
+    let top;
+
+    if (coarsePointerQuery.matches) {
+      left = anchorRect.left + anchorRect.width / 2 - previewRect.width / 2;
+      top = anchorRect.top - previewRect.height - gap;
+      if (top < margin) top = anchorRect.bottom + gap;
+    } else {
+      left = anchorRect.right + gap;
+      if (left + previewRect.width > viewportWidth - margin) {
+        left = anchorRect.left - previewRect.width - gap;
+      }
+      top =
+        anchorRect.top + anchorRect.height / 2 - previewRect.height / 2;
+    }
+
+    preview.style.left = `${clamp(left, margin, Math.max(margin, viewportWidth - previewRect.width - margin))}px`;
+    preview.style.top = `${clamp(top, margin, Math.max(margin, viewportHeight - previewRect.height - margin))}px`;
+  }
+
+  function showSourceSamplePreview(anchor) {
+    const sample = representativeSourceSample(anchor.dataset.sourceSampleId);
+    if (!sample) {
+      showToast("这个识别色暂时没有可定位的原图格子");
+      return false;
+    }
+    drawSourceSamplePreview(sample);
+    elements.sourceSamplePreview.hidden = false;
+    elements.sourceSamplePreview.setAttribute("aria-hidden", "false");
+    anchor.classList.add("sampling");
+    anchor.setAttribute("aria-describedby", "sourceSamplePreview");
+    positionSourceSamplePreview(anchor);
+    return true;
+  }
+
+  function hideSourceSamplePreview() {
+    const press = state.sourceSamplePress;
+    if (press?.timer) clearTimeout(press.timer);
+    if (press?.anchor) {
+      press.anchor.classList.remove("sampling");
+      press.anchor.removeAttribute("aria-describedby");
+    }
+    elements.sourceSamplePreview.hidden = true;
+    elements.sourceSamplePreview.setAttribute("aria-hidden", "true");
+    state.sourceSamplePress = null;
+  }
+
+  function startSourceSamplePress(event) {
+    if (event.button > 0) return;
+    const anchor = event.target.closest("[data-source-sample-id]");
+    if (!anchor) return;
+    hideSourceSamplePreview();
+    const press = {
+      pointerId: event.pointerId,
+      anchor,
+      startX: event.clientX,
+      startY: event.clientY,
+      visible: false,
+      timer: null,
+    };
+    press.timer = setTimeout(() => {
+      if (state.sourceSamplePress !== press) return;
+      press.visible = showSourceSamplePreview(anchor);
+    }, SOURCE_SAMPLE_HOLD_MS);
+    state.sourceSamplePress = press;
+    anchor.setPointerCapture?.(event.pointerId);
+  }
+
+  function moveSourceSamplePress(event) {
+    const press = state.sourceSamplePress;
+    if (!press || press.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(
+      event.clientX - press.startX,
+      event.clientY - press.startY,
+    );
+    if (distance <= (press.visible ? 18 : 9)) return;
+    finishSourceSamplePress(event);
+  }
+
+  function finishSourceSamplePress(event) {
+    const press = state.sourceSamplePress;
+    if (!press || press.pointerId !== event.pointerId) return;
+    try {
+      if (press.anchor.hasPointerCapture?.(event.pointerId)) {
+        press.anchor.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // A re-render can replace the source swatch while it is being pressed.
+    }
+    hideSourceSamplePreview();
+  }
+
+  function handleSourceSampleKeyDown(event) {
+    const anchor = event.target.closest("[data-source-sample-id]");
+    if (event.key === "Escape" && state.sourceSamplePress?.keyboard) {
+      event.preventDefault();
+      hideSourceSamplePreview();
+      return;
+    }
+    if (!anchor || !["Enter", " "].includes(event.key) || event.repeat) return;
+    event.preventDefault();
+    if (
+      state.sourceSamplePress?.keyboard &&
+      state.sourceSamplePress.anchor === anchor
+    ) {
+      hideSourceSamplePreview();
+      return;
+    }
+    hideSourceSamplePreview();
+    state.sourceSamplePress = {
+      pointerId: null,
+      anchor,
+      visible: showSourceSamplePreview(anchor),
+      timer: null,
+      keyboard: true,
+    };
+  }
+
+  function renderColorSystemControls() {
+    if (!elements.beadPaletteSelect) return;
+    elements.beadPaletteSelect.value = state.selectedPaletteId;
+    const branded = isBrandPaletteMode();
+    elements.mappingSchemeField.hidden = !branded;
+    elements.paletteSourceNotice.hidden = !branded;
+    elements.mappingDiagnostics.hidden = !branded || !state.mappingResults;
+    elements.addPaletteButton.hidden = branded;
+    elements.resetPaletteButton.textContent = branded
+      ? "重置人工指定"
+      : "重置颜色匹配";
+
+    const guideLabels = elements.paletteGuide?.querySelectorAll("span");
+    if (guideLabels?.length >= 2) {
+      guideLabels[0].textContent = branded ? "原图识别色" : "图纸颜色";
+      guideLabels[1].textContent = branded ? "匹配的品牌色" : "匹配的原图颜色";
+    }
+
+    if (!branded) return;
+    const schemes = listMappingSchemes();
+    elements.mappingSchemeSelect.replaceChildren();
+    schemes.forEach((scheme) => {
+      const option = document.createElement("option");
+      option.value = scheme.id;
+      option.textContent = scheme.label;
+      elements.mappingSchemeSelect.append(option);
+    });
+    elements.mappingSchemeSelect.value = state.activeMappingSchemeId;
+    const diagnostics = state.mappingResults?.diagnostics;
+    const usedCodes = new Set(
+      state.palette
+        .filter((color) => color.count > 0 && color.targetCode)
+        .map((color) => color.targetCode),
+    );
+    const lockedCount = Object.keys(getPaletteLocks()).length;
+    if (diagnostics) {
+      elements.mappingDiagnostics.textContent =
+        `从 ${diagnostics.paletteColorCount} 个品牌色中，为 ${diagnostics.sourceColorCount} 种原图颜色生成匹配；` +
+        `当前使用 ${usedCodes.size} 个色号，${lockedCount} 项人工锁定，计算 ${diagnostics.runtimeMs.toFixed(1)} ms。`;
+    }
+  }
+
+  function renderBrandPalette() {
+    const palette = getSelectedBeadPalette();
+    const scheme = getActiveMappingScheme();
+    elements.paletteSummary.textContent = palette
+      ? `正在使用 ${palette.brand} · ${palette.series}。左侧始终是原图识别色，右侧才是实际写入图纸和采购表的品牌色号；按住左侧色块可查看取样位置。`
+      : "品牌色表不可用，请切回无品牌模式。";
+    if (!palette || !scheme) return;
+
+    const fragment = document.createDocumentFragment();
+    state.palette.forEach((color, index) => {
+      const card = document.createElement("article");
+      card.className = `palette-mapping brand-mapping${index === state.selectedColor ? " active" : ""}`;
+      card.dataset.index = String(index);
+      card.dataset.sourceId = color.sourceId;
+
+      const source = document.createElement("div");
+      source.className = "brand-source";
+      const sourceLabel = document.createElement("span");
+      sourceLabel.className = "mapping-label";
+      sourceLabel.textContent = `${color.name} · 原图识别色`;
+      const sourceRow = document.createElement("div");
+      sourceRow.className = "brand-color-row";
+      const sourceSwatch = document.createElement("button");
+      sourceSwatch.type = "button";
+      sourceSwatch.className =
+        "brand-color-swatch source-sample-trigger";
+      sourceSwatch.style.background = colorCss(color.sourceRgb);
+      sourceSwatch.dataset.sourceSampleId = color.sourceId;
+      sourceSwatch.setAttribute(
+        "aria-label",
+        `按住查看 ${color.name} 在原图中的取样位置`,
+      );
+      sourceSwatch.title = "按住查看原图取样位置";
+      const sourceMeta = document.createElement("span");
+      sourceMeta.className = "brand-color-meta";
+      const sourceHex = document.createElement("b");
+      sourceHex.textContent = rgbToHex(color.sourceRgb);
+      const sourceCount = document.createElement("small");
+      sourceCount.textContent = `${color.count} 颗 · 保留为独立原色`;
+      sourceMeta.append(sourceHex, sourceCount);
+      sourceRow.append(sourceSwatch, sourceMeta);
+      source.append(sourceLabel, sourceRow);
+
+      const target = document.createElement("div");
+      target.className = "brand-target";
+      const targetLabel = document.createElement("span");
+      targetLabel.className = "mapping-label";
+      targetLabel.textContent = `${palette.brand} · ${palette.series}`;
+      const targetButton = document.createElement("button");
+      targetButton.type = "button";
+      targetButton.className = "brand-target-main";
+      targetButton.dataset.action = "open-bead-picker";
+      targetButton.setAttribute(
+        "aria-label",
+        `为 ${color.name} 选择其他 ${palette.brand} 色号`,
+      );
+      const targetSwatch = document.createElement("i");
+      targetSwatch.className = "brand-color-swatch";
+      targetSwatch.style.background = colorCss(color);
+      const targetMeta = document.createElement("span");
+      targetMeta.className = "brand-color-meta";
+      const targetCode = document.createElement("b");
+      targetCode.textContent = color.targetCode || "—";
+      const targetName = document.createElement("small");
+      targetName.textContent =
+        color.targetName && color.targetName !== color.targetCode
+          ? color.targetName
+          : "点击查看完整色表";
+      targetMeta.append(targetCode, targetName);
+      targetButton.append(targetSwatch, targetMeta);
+
+      const quality = document.createElement("div");
+      quality.className = "brand-match-quality";
+      const qualityValue = document.createElement("strong");
+      qualityValue.textContent = `ΔE ${color.localDeltaE00.toFixed(1)} · 可信度 ${Math.round(color.confidence * 100)}%`;
+      const lockButton = document.createElement("button");
+      lockButton.type = "button";
+      lockButton.dataset.action = "toggle-brand-lock";
+      lockButton.classList.toggle("locked", color.locked);
+      lockButton.textContent = color.locked ? "已锁定" : "锁定";
+      lockButton.setAttribute(
+        "aria-label",
+        color.locked
+          ? `解除 ${color.name} 的人工色号锁定`
+          : `锁定 ${color.name} 当前色号`,
+      );
+      quality.append(qualityValue, lockButton);
+      target.append(targetLabel, targetButton, quality);
+
+      const candidates = document.createElement("div");
+      candidates.className = "brand-candidates";
+      const candidatePool = [...(color.candidates || [])];
+      const selectedCandidate = candidatePool.find(
+        (candidate) => candidate.code === color.targetCode,
+      );
+      const visibleCandidates = [
+        ...(selectedCandidate ? [selectedCandidate] : []),
+        ...candidatePool,
+      ]
+        .filter(
+          (candidate, candidateIndex, all) =>
+            all.findIndex((item) => item.code === candidate.code) ===
+            candidateIndex,
+        )
+        .slice(0, 4);
+      visibleCandidates.forEach((candidate) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `brand-candidate${candidate.code === color.targetCode ? " current" : ""}`;
+        button.dataset.action = "set-brand-candidate";
+        button.dataset.code = candidate.code;
+        button.setAttribute(
+          "aria-label",
+          `把 ${color.name} 指定为 ${candidate.code}，色差 ${candidate.deltaE00.toFixed(1)}`,
+        );
+        const swatch = document.createElement("i");
+        swatch.style.background = colorCss(candidate.rgb);
+        const meta = document.createElement("span");
+        const code = document.createElement("b");
+        code.textContent = candidate.code;
+        const delta = document.createElement("small");
+        delta.textContent = `ΔE ${candidate.deltaE00.toFixed(1)}`;
+        meta.append(code, delta);
+        button.append(swatch, meta);
+        candidates.append(button);
+      });
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "brand-candidate-more";
+      more.dataset.action = "open-bead-picker";
+      more.textContent = "全部色号";
+      candidates.append(more);
+
+      card.append(source, target, candidates);
+      fragment.append(card);
+    });
+    elements.paletteList.append(fragment);
+    elements.resetPaletteButton.disabled =
+      Object.keys(getPaletteLocks()).length === 0;
+  }
+
   function renderPalette() {
+    hideSourceSamplePreview();
     elements.paletteList.replaceChildren();
+    renderColorSystemControls();
+    if (isBrandPaletteMode()) {
+      renderBrandPalette();
+      return;
+    }
     elements.paletteSummary.textContent = state.detectedPaletteCount
-      ? `算法先分出了 ${state.detectedPaletteCount} 种颜色；可改图纸用色和色号，也可把原图颜色标签拖到其他颜色。`
+      ? `算法先分出了 ${state.detectedPaletteCount} 种颜色；无品牌模式保留识别色，可修改图纸颜色、颜色标注和原图匹配关系。`
       : "当前没有可用颜色；可先添加图纸颜色，再从原图吸取匹配色。";
     const fragment = document.createDocumentFragment();
     state.palette.forEach((color, index) => {
@@ -3390,13 +4347,13 @@
       const codeLabel = document.createElement("label");
       codeLabel.className = "palette-code-field";
       const codeCaption = document.createElement("span");
-      codeCaption.textContent = "色号";
+      codeCaption.textContent = "颜色标注";
       const codeInput = document.createElement("input");
       codeInput.type = "text";
       codeInput.value = color.code;
       codeInput.maxLength = 12;
       codeInput.dataset.action = "color-code";
-      codeInput.setAttribute("aria-label", `修改图纸颜色 ${color.name} 的色号`);
+      codeInput.setAttribute("aria-label", `修改图纸颜色 ${color.name} 的颜色标注`);
       codeLabel.append(codeCaption, codeInput);
       target.append(targetHeading, targetColorRow, codeLabel);
 
@@ -3523,8 +4480,15 @@
       }
     }
 
-    const usedColors = state.palette.filter((color) => color.count > 0).length;
-    elements.livePreviewMeta.textContent = `${state.cols} × ${state.rows} · ${usedColors} 色`;
+    const usedColors = isBrandPaletteMode()
+      ? new Set(
+          state.palette
+            .filter((color) => color.count > 0 && color.targetCode)
+            .map((color) => color.targetCode),
+        ).size
+      : state.palette.filter((color) => color.count > 0).length;
+    elements.livePreviewMeta.textContent =
+      `${state.cols} × ${state.rows} · ${usedColors} ${isBrandPaletteMode() ? "色号" : "色"}`;
   }
 
   function setLivePreviewPosition(x, y) {
@@ -3543,19 +4507,33 @@
 
   function initializeLivePreviewPosition() {
     if (
-      state.previewPosition ||
+      (state.previewPosition && state.previewPositionManual) ||
       elements.livePatternPreview.hidden ||
       mobileLayoutQuery.matches
     ) {
       return;
     }
-    const previewRect = elements.canvasStage.getBoundingClientRect();
-    const preview = elements.livePatternPreview;
-    const x = Math.min(
-      window.innerWidth - preview.offsetWidth - 18,
-      previewRect.right - preview.offsetWidth - 18,
-    );
-    setLivePreviewPosition(x, previewRect.top + 14);
+    const placeAtPreview = () => {
+      if (elements.livePatternPreview.hidden || mobileLayoutQuery.matches) {
+        return;
+      }
+      const previewRect = elements.canvasStage.getBoundingClientRect();
+      const preview = elements.livePatternPreview;
+      const actionBottom = Math.max(
+        elements.replaceButton?.getBoundingClientRect().bottom || 0,
+        elements.exportButton?.getBoundingClientRect().bottom || 0,
+      );
+      const x = Math.min(
+        window.innerWidth - preview.offsetWidth - 18,
+        previewRect.right - preview.offsetWidth - 18,
+      );
+      setLivePreviewPosition(
+        x,
+        Math.max(previewRect.top + 14, actionBottom + 18),
+      );
+    };
+    placeAtPreview();
+    requestAnimationFrame(placeAtPreview);
   }
 
   function clampLivePreviewPosition() {
@@ -3582,6 +4560,7 @@
     if (event.button > 0 || event.target.closest("button") || !event.target.closest("header")) return;
     const previewRect = elements.livePatternPreview.getBoundingClientRect();
     setLivePreviewPosition(previewRect.left, previewRect.top);
+    state.previewPositionManual = true;
     state.previewDrag = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -3618,11 +4597,19 @@
 
   function renderStatus() {
     const filled = state.cells.filter((cell) => cell >= 0).length;
-    const usedColors = state.palette.filter((color) => color.count > 0).length;
+    const usedColors = isBrandPaletteMode()
+      ? new Set(
+          state.palette
+            .filter((color) => color.count > 0 && color.targetCode)
+            .map((color) => color.targetCode),
+        ).size
+      : state.palette.filter((color) => color.count > 0).length;
     const averageConfidence =
       state.confidences.reduce((sum, value) => sum + value, 0) / Math.max(1, state.confidences.length);
     elements.gridStatus.textContent = `${state.cols} × ${state.rows} · ${filled.toLocaleString()} 颗`;
-    elements.colorStatus.textContent = `${usedColors} 种颜色`;
+    elements.colorStatus.textContent = isBrandPaletteMode()
+      ? `${usedColors} 个品牌色号`
+      : `${usedColors} 种颜色`;
     const confidence = (averageConfidence + state.detectionConfidence) / 2;
     elements.confidenceStatus.textContent =
       confidence > 0.78 ? "识别稳定" : confidence > 0.58 ? "建议检查网格" : "建议手动校正";
@@ -3636,6 +4623,7 @@
   }
 
   function renderAll() {
+    if (!isBrandPaletteMode() && state.palette.length) captureNoBrandDraft();
     updateView();
     updateColorPickUi();
     drawSourceThumb();
@@ -3672,8 +4660,11 @@
     else {
       requestAnimationFrame(() => {
         drawSourceThumb();
-        if (state.previewPosition) clampLivePreviewPosition();
-        else initializeLivePreviewPosition();
+        if (state.previewPosition && state.previewPositionManual) {
+          clampLivePreviewPosition();
+        } else {
+          initializeLivePreviewPosition();
+        }
       });
     }
   }
@@ -3709,10 +4700,17 @@
     const previous = state.cells[index];
     const next = state.selectedColor;
     if (previous === next) return;
-    state.history.push({ index, previous, next });
+    const sourceModel = isBrandPaletteMode();
+    state.history.push({ index, previous, next, sourceModel });
     if (state.history.length > 100) state.history.shift();
     state.future = [];
-    state.cells[index] = next;
+    if (sourceModel) {
+      state.sourceCells[index] = next;
+      recalculateSourceCounts();
+      applyBrandMatching({ render: false, preserveHistory: true });
+    } else {
+      state.cells[index] = next;
+    }
     recalculateCounts();
     renderPattern();
     renderLivePatternPreview();
@@ -3724,7 +4722,13 @@
   function undo() {
     const action = state.history.pop();
     if (!action) return;
-    state.cells[action.index] = action.previous;
+    if (action.sourceModel && isBrandPaletteMode()) {
+      state.sourceCells[action.index] = action.previous;
+      recalculateSourceCounts();
+      applyBrandMatching({ render: false, preserveHistory: true });
+    } else {
+      state.cells[action.index] = action.previous;
+    }
     state.future.push(action);
     recalculateCounts();
     renderPattern();
@@ -3737,7 +4741,13 @@
   function redo() {
     const action = state.future.pop();
     if (!action) return;
-    state.cells[action.index] = action.next;
+    if (action.sourceModel && isBrandPaletteMode()) {
+      state.sourceCells[action.index] = action.next;
+      recalculateSourceCounts();
+      applyBrandMatching({ render: false, preserveHistory: true });
+    } else {
+      state.cells[action.index] = action.next;
+    }
     state.history.push(action);
     recalculateCounts();
     renderPattern();
@@ -3834,6 +4844,10 @@
   }
 
   function openColorEditor(index) {
+    if (isBrandPaletteMode()) {
+      openBeadColorDialog(index);
+      return;
+    }
     const color = state.palette[index];
     if (!color) return;
     state.colorEditorIndex = index;
@@ -3844,6 +4858,7 @@
   }
 
   function applyPaletteColor(index, rgb) {
+    if (isBrandPaletteMode()) return;
     const color = state.palette[index];
     if (!color || !rgb) return;
     const previousHex = rgbToHex(color);
@@ -3932,6 +4947,7 @@
   }
 
   function beginColorPick(index) {
+    if (isBrandPaletteMode()) return;
     if (!state.palette[index]) return;
     state.selectedColor = index;
     state.colorPickTarget = index;
@@ -3999,6 +5015,7 @@
   }
 
   function addPaletteEntry() {
+    if (isBrandPaletteMode()) return;
     const selected = state.palette[state.selectedColor];
     const rgb = selected
       ? { r: selected.r, g: selected.g, b: selected.b }
@@ -4019,6 +5036,7 @@
   }
 
   function removePaletteEntry(index) {
+    if (isBrandPaletteMode()) return;
     if (!state.palette[index]) return;
     const name = state.palette[index].name;
     cancelColorPick({ redraw: false });
@@ -4030,6 +5048,7 @@
   }
 
   function removePaletteMatch(index, matchIndex) {
+    if (isBrandPaletteMode()) return;
     const entry = state.palette[index];
     if (!entry?.matches?.[matchIndex]) return;
     entry.matches.splice(matchIndex, 1);
@@ -4039,6 +5058,18 @@
   }
 
   function resetPaletteMappings() {
+    if (isBrandPaletteMode()) {
+      const locks = getPaletteLocks();
+      if (!Object.keys(locks).length) {
+        showToast("当前没有人工指定的品牌色");
+        return;
+      }
+      state.lockedMappingsByPalette[state.selectedPaletteId] = {};
+      state.activeMappingSchemeId = "coherent";
+      applyBrandMatching();
+      showToast("已清除人工指定，并重新计算整套品牌色");
+      return;
+    }
     if (!state.detectedPaletteSnapshot.length) {
       showToast("当前没有可恢复的自动识别结果");
       return;
@@ -4052,6 +5083,7 @@
   }
 
   function transferPaletteMatch(sourceIndex, matchIndex, targetIndex) {
+    if (isBrandPaletteMode()) return;
     const source = state.palette[sourceIndex];
     const target = state.palette[targetIndex];
     const match = source?.matches?.[matchIndex];
@@ -4518,6 +5550,35 @@
     showToast(`${label}已下载`);
   }
 
+  function getExportLegendColors() {
+    const used = state.palette.filter((color) => color.count > 0);
+    if (!isBrandPaletteMode()) return used;
+    const grouped = new Map();
+    used.forEach((color) => {
+      const key = color.targetCode || color.code;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          ...color,
+          count: 0,
+          markers: [],
+        });
+      }
+      const entry = grouped.get(key);
+      entry.count += color.count;
+      entry.markers.push(color.name);
+    });
+    return [...grouped.values()]
+      .map((color) => ({
+        ...color,
+        name: color.markers.join("/"),
+      }))
+      .sort((left, right) =>
+        colorMatchingApi?.compareCodes
+          ? colorMatchingApi.compareCodes(left.code, right.code)
+          : String(left.code).localeCompare(String(right.code)),
+      );
+  }
+
   function calculateExportLayout(cols, rows, colorCount) {
     const largestAxis = Math.max(cols, rows, 1);
     const cell = clamp(Math.floor(4000 / largestAxis), 20, 40);
@@ -4563,7 +5624,7 @@
   }
 
   function makeExportCanvas() {
-    const used = state.palette.filter((color) => color.count > 0);
+    const used = getExportLegendColors();
     const layout = calculateExportLayout(state.cols, state.rows, used.length);
     const {
       cell,
@@ -4602,7 +5663,12 @@
           ctx.font = `700 ${Math.max(9, Math.floor(cell * 0.42))}px system-ui`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText(color.name, x + cell / 2, y + cell / 2, cell - 3);
+          ctx.fillText(
+            patternColorLabel(color),
+            x + cell / 2,
+            y + cell / 2,
+            cell - 3,
+          );
         }
       }
     }
@@ -4635,7 +5701,11 @@
     ctx.fillStyle = "#70746c";
     ctx.font = `${Math.round(12 * legendScale)}px system-ui`;
     ctx.fillText(
-      `${state.cols} × ${state.rows} · ${state.cells.filter((cellIndex) => cellIndex >= 0).length} 颗`,
+      `${state.cols} × ${state.rows} · ${state.cells.filter((cellIndex) => cellIndex >= 0).length} 颗${
+        isBrandPaletteMode()
+          ? ` · ${getSelectedBeadPalette()?.brand || ""} ${getSelectedBeadPalette()?.series || ""}`
+          : " · 无品牌识别色"
+      }`,
       legendX,
       Math.round(72 * legendScale),
     );
@@ -4658,11 +5728,19 @@
       );
       ctx.fillStyle = "#20231f";
       ctx.font = `700 ${Math.round(12 * legendScale)}px system-ui`;
-      ctx.fillText(color.name, x + Math.round(29 * legendScale), y);
+      const legendLabel =
+        isBrandPaletteMode() && color.targetCode
+          ? color.targetCode
+          : color.name;
+      ctx.fillText(legendLabel, x + Math.round(29 * legendScale), y);
       ctx.fillStyle = "#70746c";
       ctx.font = `${Math.round(11 * legendScale)}px system-ui`;
       const hex = rgbToHex(color);
-      const reference = color.code === hex ? hex : `${color.code} · ${hex}`;
+      const reference = isBrandPaletteMode()
+        ? `${color.name} · ${hex}`
+        : color.code === hex
+          ? hex
+          : `${color.code} · ${hex}`;
       ctx.fillText(
         `${reference} · ${color.count} 颗`,
         x + Math.round(61 * legendScale),
@@ -4730,17 +5808,43 @@
       const values = [row + 1];
       for (let col = 0; col < state.cols; col += 1) {
         const cell = state.cells[row * state.cols + col];
-        values.push(cell < 0 ? "" : state.palette[cell].name);
+        values.push(
+          cell < 0 ? "" : patternColorLabel(state.palette[cell]),
+        );
       }
       rows.push(values.join(","));
     }
     rows.push("");
-    rows.push("名称,色号,HEX,数量");
-    state.palette
-      .filter((color) => color.count)
-      .forEach((color) =>
-        rows.push(`${color.name},${color.code},${rgbToHex(color)},${color.count}`),
-      );
+    if (isBrandPaletteMode()) {
+      const palette = getSelectedBeadPalette();
+      rows.push("图纸标记,品牌,色表,色号,名称,HEX,数量");
+      getExportLegendColors().forEach((color) => {
+        rows.push(
+          [
+            color.name,
+            palette?.brand || "",
+            palette?.series || "",
+            color.targetCode || color.code,
+            color.targetName || "",
+            rgbToHex(color),
+            color.count,
+          ]
+            .map(csvEscape)
+            .join(","),
+        );
+      });
+    } else {
+      rows.push("图纸标记,颜色标注,HEX,数量");
+      state.palette
+        .filter((color) => color.count)
+        .forEach((color) =>
+          rows.push(
+            [color.name, color.code, rgbToHex(color), color.count]
+              .map(csvEscape)
+              .join(","),
+          ),
+        );
+    }
     void finishBlobExport(
       new Blob([`\uFEFF${rows.join("\r\n")}`], { type: "text/csv;charset=utf-8" }),
       "csv",
@@ -4749,26 +5853,72 @@
   }
 
   function exportJson() {
+    const beadPalette = getSelectedBeadPalette();
+    const activeScheme = getActiveMappingScheme();
     const data = {
       format: "dougao-pattern",
-      version: 2,
+      version: 3,
+      colorModelVersion: 2,
       name: state.fileName,
       width: state.cols,
       height: state.rows,
       totalBeads: state.cells.filter((cell) => cell >= 0).length,
+      beadPalette: beadPalette
+        ? {
+            id: beadPalette.id,
+            brand: beadPalette.brand,
+            series: beadPalette.series,
+            beadSize: beadPalette.beadSize,
+            revision: beadPalette.revision,
+            source: beadPalette.source.repository,
+            rgbQuality: beadPalette.rgbQuality,
+          }
+        : null,
+      mappingScheme: activeScheme
+        ? {
+            id: activeScheme.id,
+            label: activeScheme.label,
+            method: activeScheme.method,
+            score: activeScheme.score,
+            mappings: activeScheme.mappings,
+          }
+        : null,
+      lockedMappings: beadPalette
+        ? { ...getPaletteLocks(beadPalette.id) }
+        : {},
+      sourcePalette: state.sourcePalette.map((color) => ({
+        id: color.id,
+        marker: color.marker,
+        rgb: { ...color.rgb },
+        count: color.count,
+      })),
+      sourceCells: [...state.sourceCells],
       palette: state.palette
         .map((color, index) => ({
           index,
-          name: color.name,
-          code: color.code,
+          marker: color.name,
+          sourceId: color.sourceId || null,
+          sourceHex: color.sourceRgb ? rgbToHex(color.sourceRgb) : null,
+          targetCode: color.targetCode || null,
+          targetName: color.targetName || null,
+          annotation: isBrandPaletteMode() ? null : color.code,
           hex: rgbToHex(color),
           count: color.count,
         }))
         .filter((color) => color.count),
+      purchasePalette: getExportLegendColors().map((color) => ({
+        markers: color.markers || [color.name],
+        code: color.targetCode || null,
+        name: color.targetName || null,
+        hex: rgbToHex(color),
+        count: color.count,
+      })),
       cells: Array.from({ length: state.rows }, (_, row) =>
         Array.from({ length: state.cols }, (_, col) => {
           const cell = state.cells[row * state.cols + col];
-          return cell < 0 ? null : state.palette[cell].name;
+          return cell < 0
+            ? null
+            : patternColorLabel(state.palette[cell]);
         }),
       ),
     };
@@ -4777,6 +5927,13 @@
       "json",
       "工程数据",
     );
+  }
+
+  function csvEscape(value) {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text)
+      ? `"${text.replace(/"/g, '""')}"`
+      : text;
   }
 
   function debounce(fn, delay) {
@@ -5111,6 +6268,27 @@
     elements.colorEditorDialog.addEventListener("click", (event) => {
       if (event.target === elements.colorEditorDialog) closeColorEditor();
     });
+    elements.beadColorClose.addEventListener("click", closeBeadColorDialog);
+    elements.beadColorCancel.addEventListener("click", closeBeadColorDialog);
+    elements.beadColorDialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeBeadColorDialog();
+    });
+    elements.beadColorDialog.addEventListener("click", (event) => {
+      if (event.target === elements.beadColorDialog) closeBeadColorDialog();
+    });
+    elements.beadColorSearch.addEventListener(
+      "input",
+      debounce(renderBeadColorOptions, 80),
+    );
+    elements.beadColorList.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-bead-code]");
+      if (!button || !state.beadColorSourceId) return;
+      const sourceId = state.beadColorSourceId;
+      const code = button.dataset.beadCode;
+      closeBeadColorDialog();
+      setManualBrandMapping(sourceId, code);
+    });
     elements.colorSvField.addEventListener("pointerdown", startColorSvPointer);
     elements.colorSvField.addEventListener("pointermove", moveColorSvPointer);
     elements.colorSvField.addEventListener("pointerup", finishColorSvPointer);
@@ -5240,6 +6418,14 @@
       });
     }
 
+    elements.beadPaletteSelect.addEventListener("change", () => {
+      selectBeadPalette(elements.beadPaletteSelect.value);
+    });
+    elements.mappingSchemeSelect.addEventListener("change", () => {
+      state.activeMappingSchemeId = elements.mappingSchemeSelect.value;
+      applyActiveMappingScheme();
+    });
+
     elements.mobileControlPanels?.addEventListener("scroll", handleMobileControlScroll, {
       passive: true,
     });
@@ -5250,6 +6436,25 @@
       $$("[data-control-panel]").forEach((panel) => mobileControlResizeObserver.observe(panel));
     }
 
+    elements.paletteList.addEventListener("pointerdown", startSourceSamplePress);
+    elements.paletteList.addEventListener("pointermove", moveSourceSamplePress);
+    elements.paletteList.addEventListener("pointerup", finishSourceSamplePress);
+    elements.paletteList.addEventListener("pointercancel", finishSourceSamplePress);
+    elements.paletteList.addEventListener("lostpointercapture", finishSourceSamplePress);
+    elements.paletteList.addEventListener("contextmenu", (event) => {
+      if (event.target.closest("[data-source-sample-id]")) {
+        event.preventDefault();
+      }
+    });
+    elements.paletteList.addEventListener("keydown", handleSourceSampleKeyDown);
+    elements.paletteList.addEventListener("focusout", (event) => {
+      if (
+        state.sourceSamplePress?.keyboard &&
+        event.target === state.sourceSamplePress.anchor
+      ) {
+        hideSourceSamplePreview();
+      }
+    });
     elements.paletteList.addEventListener("pointerdown", startMatchDrag);
     elements.paletteList.addEventListener("pointermove", moveMatchDrag);
     elements.paletteList.addEventListener("pointerup", finishMatchDrag);
@@ -5262,8 +6467,18 @@
       elements.paletteList.querySelectorAll(".palette-mapping").forEach((item) => {
         item.classList.toggle("active", item === card);
       });
-      const action = event.target.closest("[data-action]")?.dataset.action;
-      if (action === "open-color-editor") {
+      const actionTarget = event.target.closest("[data-action]");
+      const action = actionTarget?.dataset.action;
+      if (action === "open-bead-picker") {
+        openBeadColorDialog(index);
+      } else if (action === "set-brand-candidate") {
+        setManualBrandMapping(
+          state.palette[index]?.sourceId,
+          actionTarget.dataset.code,
+        );
+      } else if (action === "toggle-brand-lock") {
+        toggleBrandMappingLock(state.palette[index]?.sourceId);
+      } else if (action === "open-color-editor") {
         openColorEditor(index);
       } else if (action === "pick-match") {
         beginColorPick(index);
@@ -5274,6 +6489,7 @@
       }
     });
     elements.paletteList.addEventListener("input", (event) => {
+      if (isBrandPaletteMode()) return;
       const card = event.target.closest(".palette-mapping");
       if (!card) return;
       const index = Number(card.dataset.index);
@@ -5288,6 +6504,7 @@
       }
     });
     elements.paletteList.addEventListener("focusout", (event) => {
+      if (isBrandPaletteMode()) return;
       if (event.target.dataset.action !== "color-code") return;
       const card = event.target.closest(".palette-mapping");
       if (!card) return;
@@ -5372,6 +6589,9 @@
         syncMobileEditorOrder();
         syncMobileControlCarousel({ align: true });
         if (state.pendingCrop) drawCropCanvas();
+        if (state.sourceSamplePress?.visible) {
+          positionSourceSamplePreview(state.sourceSamplePress.anchor);
+        }
         if (!state.image) return;
         sizeSourceEditor();
         drawSourceThumb();
@@ -5481,7 +6701,7 @@
           recognitionSeed,
         });
         return {
-          version: `v69-${state.recognitionEngine}`,
+          version: `v70-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -5508,6 +6728,14 @@
 
   function init() {
     restoreSettings();
+    populateBeadPaletteSelect();
+    const paletteErrors = beadPaletteApi?.validate?.() || [];
+    if (paletteErrors.length) {
+      console.error("BeadColors snapshot validation failed", paletteErrors);
+      state.selectedPaletteId = "none";
+      elements.beadPaletteSelect.value = "none";
+      elements.beadPaletteSelect.disabled = true;
+    }
     bindEvents();
     installRecognitionLabBridge();
     syncMobileEditorOrder();
@@ -5525,7 +6753,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v69.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v70.js").catch(() => {});
       }
     }
     window.addEventListener(
