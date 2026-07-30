@@ -14,8 +14,13 @@ const contentTypes = new Map([
   [".js", "application/javascript; charset=utf-8"],
   [".mjs", "application/javascript; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
+  [".webp", "image/webp"],
+  [".gif", "image/gif"],
+  [".bmp", "image/bmp"],
   [".webmanifest", "application/manifest+json; charset=utf-8"],
 ]);
 
@@ -47,6 +52,13 @@ async function resolveRequestFile(requestUrl) {
   try {
     const fileStat = await stat(candidate);
     if (fileStat.isFile()) return { path: candidate, status: 200 };
+    if (fileStat.isDirectory()) {
+      const directoryIndex = resolve(candidate, "index.html");
+      const indexStat = await stat(directoryIndex);
+      if (indexStat.isFile()) {
+        return { path: directoryIndex, status: 200 };
+      }
+    }
   } catch {
     // Cloudflare Pages serves index.html as the fallback when no 404.html exists.
   }

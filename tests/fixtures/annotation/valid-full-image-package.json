@@ -1,0 +1,107 @@
+{
+  "kind": "dougao-recognition-dataset",
+  "schemaVersion": 2,
+  "createdAt": "2026-07-30T00:00:00.000Z",
+  "tool": {
+    "name": "dougao-recognition-annotation-tool",
+    "version": 2
+  },
+  "imagesIncluded": false,
+  "coordinateSystem": {
+    "origin": "top-left",
+    "cornerOrder": [
+      "top-left",
+      "top-right",
+      "bottom-right",
+      "bottom-left"
+    ],
+    "normalizedRange": [0, 1],
+    "pixelReference": "browser-decoded-image"
+  },
+  "samples": [
+    {
+      "sampleId": "sha256:2b7551b35e12c9dd3dc6ed11ea858b7505e1a6b0e0166e00afc55657baccc651",
+      "source": {
+        "fileName": "4ec37b0487284aa97d5287be969e3c47.jpg",
+        "sha256": "2b7551b35e12c9dd3dc6ed11ea858b7505e1a6b0e0166e00afc55657baccc651",
+        "mimeType": "image/jpeg",
+        "byteSize": 34005,
+        "decodedWidth": 700,
+        "decodedHeight": 751
+      },
+      "imageTransform": {
+        "crop": null,
+        "coordinateSpace": "browser-decoded-image",
+        "exifOrientationAppliedByDecoder": true
+      },
+      "scene": {
+        "category": "pixel-art",
+        "tags": [
+          "grid-none",
+          "plain-background",
+          "jpeg-compression"
+        ]
+      },
+      "split": "development",
+      "rights": {
+        "status": "review-required",
+        "distribution": "private",
+        "creator": "",
+        "sourceUrl": "",
+        "license": "",
+        "acquiredAt": "2026-07-30"
+      },
+      "groundTruth": {
+        "cols": 17,
+        "rows": 25,
+        "cornerOrder": [
+          "top-left",
+          "top-right",
+          "bottom-right",
+          "bottom-left"
+        ],
+        "cornersNormalized": [
+          {
+            "x": 0.08,
+            "y": 0.08
+          },
+          {
+            "x": 0.92,
+            "y": 0.08
+          },
+          {
+            "x": 0.92,
+            "y": 0.92
+          },
+          {
+            "x": 0.08,
+            "y": 0.92
+          }
+        ],
+        "cornersImagePixels": [
+          {
+            "x": 56,
+            "y": 60.08
+          },
+          {
+            "x": 644,
+            "y": 60.08
+          },
+          {
+            "x": 644,
+            "y": 690.92
+          },
+          {
+            "x": 56,
+            "y": 690.92
+          }
+        ],
+        "frameCoverageRatio": 0.7056
+      },
+      "annotation": {
+        "note": "浏览器端到端载入测试。",
+        "annotatedAt": "2026-07-30T00:00:00.000Z"
+      }
+    }
+  ]
+}

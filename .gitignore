@@ -7,3 +7,4 @@ public/
 *.tgz
 .idea/
 .codex-remote-attachments/
+datasets/private/

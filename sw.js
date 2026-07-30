@@ -1,17 +1,24 @@
-const CACHE_NAME = "dougao-v70";
+const CACHE_NAME = "dougao-v71";
 const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
 const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
 const ASSETS = [
   "./",
   "./index.html",
   "./static.html",
-  "./styles-v70.css",
-  "./bead-palettes-v70.js",
-  "./color-matching-core-v70.js",
-  "./app-v70.js",
-  "./manifest-v70.webmanifest",
+  "./styles-v71.css",
+  "./bead-palettes-v71.js",
+  "./color-matching-core-v71.js",
+  "./image-adjustments-core-v71.js",
+  "./app-v71.js",
+  "./manifest-v71.webmanifest",
   "./recognition/recognition-image-core.mjs?v=64",
   "./recognition/dominant-lattice-core.mjs?v=64",
+  "./recognition/recognition-dataset-core.mjs",
+  "./recognition/recognition-dataset-core.mjs?integrated=2",
+  "./annotation-tool/index.html",
+  "./annotation-tool/annotation-tool-core.mjs?tool=1",
+  "./annotation-tool/annotation-tool-core.mjs?integrated=2",
+  "./annotation-tool/redirect.mjs",
   "./favicon.svg",
   "./og.png",
 ];

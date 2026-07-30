@@ -4,6 +4,10 @@ import {
   formatAngle,
   makeAnalysisCanvas,
 } from "../recognition/recognition-image-core.mjs?v=64";
+import {
+  evaluateCandidateSet,
+  summarizeRecognitionBenchmark,
+} from "../recognition/recognition-benchmark-core.mjs?v=1";
 
 const elements = {
   caseList: document.querySelector("#caseList"),
@@ -130,6 +134,18 @@ function cloneGroundTruth(value) {
 
 function currentCandidate(caseState) {
   return caseState.hybrid?.candidates[caseState.selectedCandidate] || null;
+}
+
+function benchmarkCase(caseState) {
+  if (!caseState.groundTruth || !caseState.hybrid?.candidates?.length) {
+    return null;
+  }
+  const { width, height } = caseState.analysis.canvas;
+  return evaluateCandidateSet(
+    caseState.hybrid.candidates,
+    caseState.groundTruth,
+    { width, height },
+  );
 }
 
 function automaticTruthDraft(caseState) {
@@ -625,6 +641,7 @@ function renderCandidateButtons(caseState) {
   const container = caseState.card.querySelector(".candidate-switcher");
   container.replaceChildren();
   const candidates = caseState.hybrid?.candidates || [];
+  const benchmark = benchmarkCase(caseState);
   candidates.slice(0, 5).forEach((candidate, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -636,10 +653,12 @@ function renderCandidateButtons(caseState) {
       candidate,
       caseState.config.review,
     );
+    const truthBest = benchmark?.bestIndex === index;
     button.textContent = `候选 ${index + 1} · ${candidate.frame.cols}×${candidate.frame.rows}${
       reviewed ? " · 人工标记" : ""
-    }`;
+    }${truthBest ? " · 基准最优" : ""}`;
     if (reviewed) button.classList.add("reviewed");
+    if (truthBest) button.classList.add("truth-best");
     button.title = `${aliasLabels[candidate.alias] || candidate.alias}，${candidate.source === "center" ? "中心结构提出" : "角点提出"}，边界由${frameMethodLabels[candidate.frame.method] || candidate.frame.method}确定，得分 ${candidate.score.toFixed(3)}`;
     button.dataset.frameDiagnostics = JSON.stringify(
       candidate.frame.support?.hypotheses || [],
@@ -653,6 +672,7 @@ function renderCandidateButtons(caseState) {
       renderCandidateButtons(caseState);
       renderResultCanvas(caseState, "hybrid");
       updateEvidence(caseState);
+      updateGroundTruthControls(caseState);
       if (labState.zoom?.caseState === caseState && labState.zoom.method === "hybrid") {
         renderZoom();
       }
@@ -669,9 +689,22 @@ function updateGroundTruthControls(caseState) {
     ? `已标注 ${saved.cols}×${saved.rows}`
     : "标注人工解";
   const expected = caseState.card.querySelector(".expected-grid");
-  expected.textContent = saved
-    ? `人工标注：${saved.cols} × ${saved.rows}（已保存）`
-    : expectedText(caseState);
+  const benchmark = benchmarkCase(caseState);
+  const evaluation = benchmark?.evaluations[caseState.selectedCandidate];
+  if (saved && evaluation?.valid) {
+    const gridText = evaluation.gridExact
+      ? "行列正确"
+      : `相差 ${evaluation.colError} 列 / ${evaluation.rowError} 行`;
+    expected.textContent = `人工标注：${saved.cols} × ${saved.rows}；当前候选${gridText}，角点 ${evaluation.meanCornerErrorCells.toFixed(
+      2,
+    )} 格，框重合 ${Math.round(evaluation.frameIou * 100)}%；基准最优为候选 ${
+      benchmark.bestIndex + 1
+    }`;
+  } else {
+    expected.textContent = saved
+      ? `人工标注：${saved.cols} × ${saved.rows}（等待候选）`
+      : expectedText(caseState);
+  }
   const count = labState.cases.filter((item) => item.groundTruth).length;
   elements.exportGroundTruth.disabled = count === 0;
   elements.exportGroundTruth.textContent = count
@@ -754,6 +787,7 @@ function saveTruthDraft() {
     ...cloneGroundTruth(editor.draft),
     savedAt: new Date().toISOString(),
   };
+  renderCandidateButtons(editor.caseState);
   updateGroundTruthControls(editor.caseState);
   elements.truthStatus.textContent =
     "本例已保存到当前浏览器内存；请用页面顶部按钮下载 JSON 数据包。";
@@ -765,6 +799,7 @@ function clearTruthDraft() {
   if (!editor) return;
   editor.caseState.groundTruth = null;
   editor.draft = automaticTruthDraft(editor.caseState);
+  renderCandidateButtons(editor.caseState);
   updateGroundTruthControls(editor.caseState);
   syncTruthInputs();
   renderTruthEditor();
@@ -959,6 +994,7 @@ async function importGroundTruthPackage(file) {
     const truth = parseImportedTruth(sample, caseState);
     if (!truth) continue;
     caseState.groundTruth = truth;
+    renderCandidateButtons(caseState);
     updateGroundTruthControls(caseState);
     imported += 1;
   }
@@ -1072,6 +1108,7 @@ async function runCase(caseState, legacyBridge, index, total) {
     updateHybridMeta(caseState);
     renderCandidateButtons(caseState);
     updateEvidence(caseState);
+    updateGroundTruthControls(caseState);
     renderResultCanvas(caseState, "hybrid");
     setCaseState(caseState, "done", "对照已完成");
   } catch (error) {
@@ -1178,6 +1215,9 @@ function openZoom(caseState, method) {
 }
 
 function resultSummary() {
+  const benchmark = summarizeRecognitionBenchmark(
+    labState.cases.map(benchmarkCase).filter(Boolean),
+  );
   const rows = [
     "豆稿网格识别人工对照",
     `前提：主体外接区域占裁剪图 > ${Math.round(
@@ -1185,10 +1225,19 @@ function resultSummary() {
     )}%`,
     "",
   ];
+  if (benchmark.caseCount) {
+    rows.push(
+      `量化基准：${benchmark.caseCount} 例；Top-1 ${benchmark.top1Count}/${benchmark.caseCount}，Top-3 ${benchmark.top3Count}/${benchmark.caseCount}，正确行列候选召回 ${benchmark.exactGridRecallCount}/${benchmark.caseCount}`,
+      "",
+    );
+  }
   labState.cases.forEach((caseState, index) => {
     const legacy = caseState.legacy;
     const candidate =
       caseState.hybrid?.candidates[caseState.selectedCandidate];
+    const caseBenchmark = benchmarkCase(caseState);
+    const evaluation =
+      caseBenchmark?.evaluations[caseState.selectedCandidate] || null;
     rows.push(
       `${index + 1}. ${
         caseDescriptions[caseState.config.label]?.title || caseState.config.label
@@ -1208,6 +1257,11 @@ function resultSummary() {
           ? `${caseState.config.expectedGrid.cols}×${caseState.config.expectedGrid.rows}`
           : "待人工确认"
       }；判断：${caseState.verdict || "未选择"}`,
+      evaluation?.valid
+        ? `   量化：角点 ${evaluation.meanCornerErrorCells.toFixed(2)} 格，框重合 ${Math.round(
+            evaluation.frameIou * 100,
+          )}%，基准最优候选 ${caseBenchmark.bestIndex + 1}`
+        : "",
       "",
     );
   });

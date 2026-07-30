@@ -8,8 +8,10 @@
   },
   "scripts": {
     "check:beadcolors": "node scripts/check-beadcolors.mjs",
+    "check:recognition-data": "node scripts/check-recognition-data.mjs",
     "sync:static": "node scripts/sync-static.mjs",
     "sync:lab": "node scripts/sync-recognition-lab.mjs",
+    "sync:annotation": "node scripts/sync-annotation-tool.mjs",
     "dev": "npm run sync:static && node scripts/serve-static.mjs",
     "lab": "npm run sync:static && node scripts/serve-static.mjs",
     "build": "npm run sync:static",

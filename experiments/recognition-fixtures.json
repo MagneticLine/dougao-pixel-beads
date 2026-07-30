@@ -1,10 +1,40 @@
 {
+  "schemaVersion": 2,
   "targetCoverageMinimum": 0.5,
   "analysisMaxSide": 560,
+  "targetCounts": {
+    "realCore": [60, 100],
+    "synthetic": [200, 500],
+    "holdout": [20, 30]
+  },
+  "sceneCategories": [
+    "pixel-art",
+    "pattern-chart",
+    "fused-bead-photo",
+    "holed-bead-photo"
+  ],
+  "syntheticPerturbations": [
+    "blur",
+    "jpeg-compression",
+    "integer-and-noninteger-scaling",
+    "rotation",
+    "perspective",
+    "uneven-lighting",
+    "complex-background"
+  ],
   "cases": [
     {
       "file": "../tests/fixtures/recognition/4ec37b0487284aa97d5287be969e3c47.jpg",
       "label": "simple-pixel-art",
+      "category": "pixel-art",
+      "tags": ["grid-none", "plain-background", "jpeg-compression"],
+      "split": "development",
+      "truthStatus": "grid-only",
+      "rights": {
+        "status": "review-required",
+        "distribution": "existing-project-fixture",
+        "source": "existing-local-fixture"
+      },
       "crop": { "left": 90, "top": 55, "width": 500, "height": 640 },
       "expectedGrid": { "cols": 17, "rows": 25 },
       "review": {
@@ -16,6 +46,15 @@
     {
       "file": "../tests/fixtures/recognition/v2-e2734e283d17f84293b4188c5e1842ba_r.jpg",
       "label": "pixel-art-with-background",
+      "category": "pixel-art",
+      "tags": ["grid-none", "complex-background"],
+      "split": "development",
+      "truthStatus": "unlabeled",
+      "rights": {
+        "status": "review-required",
+        "distribution": "existing-project-fixture",
+        "source": "existing-local-fixture"
+      },
       "crop": { "left": 220, "top": 205, "width": 280, "height": 240 },
       "expectedGrid": null,
       "review": {
@@ -27,6 +66,15 @@
     {
       "file": "../tests/fixtures/recognition/9ee523f8fecd4097ab6c9bae7b664121.jpg",
       "label": "fused-beads",
+      "category": "fused-bead-photo",
+      "tags": ["grid-none"],
+      "split": "development",
+      "truthStatus": "unlabeled",
+      "rights": {
+        "status": "review-required",
+        "distribution": "existing-project-fixture",
+        "source": "existing-local-fixture"
+      },
       "crop": { "left": 240, "top": 620, "width": 720, "height": 680 },
       "expectedGrid": null,
       "review": {
@@ -38,6 +86,15 @@
     {
       "file": "../tests/fixtures/recognition/467546592_18101250943456758_3079173382637406535_n.jpg",
       "label": "beads-with-holes",
+      "category": "holed-bead-photo",
+      "tags": ["grid-none"],
+      "split": "development",
+      "truthStatus": "grid-only",
+      "rights": {
+        "status": "review-required",
+        "distribution": "existing-project-fixture",
+        "source": "existing-local-fixture"
+      },
       "crop": { "left": 350, "top": 470, "width": 660, "height": 610 },
       "expectedGrid": { "cols": 15, "rows": 14 },
       "review": {
@@ -49,6 +106,15 @@
     {
       "file": "../tests/fixtures/recognition/C31D783E21EAB9E5C73DF173EB457651.jpg",
       "label": "labeled-chart",
+      "category": "pattern-chart",
+      "tags": ["grid-visible", "text-labels", "color-codes"],
+      "split": "development",
+      "truthStatus": "grid-only",
+      "rights": {
+        "status": "review-required",
+        "distribution": "existing-project-fixture",
+        "source": "existing-local-fixture"
+      },
       "crop": { "left": 20, "top": 65, "width": 1217, "height": 1500 },
       "expectedGrid": { "cols": 29, "rows": 34 },
       "review": {

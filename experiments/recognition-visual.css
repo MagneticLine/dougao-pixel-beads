@@ -58,11 +58,17 @@ button {
 
 .home-link {
   display: inline-flex;
-  margin-bottom: 18px;
   color: #56584f;
   font-size: 13px;
   font-weight: 750;
   text-decoration: none;
+}
+
+.lab-links {
+  display: flex;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 8px 18px;
 }
 
 .home-link:hover,
@@ -501,6 +507,16 @@ h1 {
 
 .candidate-switcher button.reviewed {
   box-shadow: inset 0 0 0 1px rgba(43, 157, 112, 0.42);
+}
+
+.candidate-switcher button.truth-best {
+  border-color: rgba(41, 127, 144, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(41, 127, 144, 0.28);
+  color: #1f6975;
+}
+
+.candidate-switcher button.truth-best[aria-pressed="true"] {
+  background: rgba(41, 127, 144, 0.1);
 }
 
 .evidence-panel {

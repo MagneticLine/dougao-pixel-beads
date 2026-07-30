@@ -12,6 +12,8 @@ const files = [
   ["experiments/recognition-visual.mjs", "recognition-visual.mjs"],
   ["recognition/recognition-image-core.mjs", "../recognition/recognition-image-core.mjs"],
   ["recognition/dominant-lattice-core.mjs", "../recognition/dominant-lattice-core.mjs"],
+  ["recognition/recognition-benchmark-core.mjs", "../recognition/recognition-benchmark-core.mjs"],
+  ["recognition/recognition-dataset-core.mjs", "../recognition/recognition-dataset-core.mjs"],
   ["experiments/recognition-fixtures.json", "recognition-fixtures.json"],
   ...config.cases.map((item) => [
     `tests/fixtures/recognition/${basename(item.file)}`,

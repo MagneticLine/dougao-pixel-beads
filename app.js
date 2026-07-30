@@ -4,6 +4,10 @@
   const hasDocument = typeof document !== "undefined";
   const $ = (selector) => (hasDocument ? document.querySelector(selector) : null);
   const $$ = (selector) => (hasDocument ? [...document.querySelectorAll(selector)] : []);
+  const pageParameters = hasDocument
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const annotationMode = pageParameters.get("mode") === "annotation";
   const mobileLayoutQuery =
     hasDocument && typeof window.matchMedia === "function"
       ? window.matchMedia("(max-width: 680px)")
@@ -15,6 +19,58 @@
   const DOWNLOAD_CACHE_NAME = "dougao-local-downloads-v1";
   const DOWNLOAD_PATH_PREFIX = "/__dougao_download__/";
   const MAX_PATTERN_DIMENSION = 200;
+  const EMPTY_MAPPING_CODE = "__DOUGAO_EMPTY__";
+
+  function isEmptyPaletteColor(color) {
+    return Boolean(color?.isEmpty);
+  }
+
+  function isFilledPatternCell(cellIndex, palette) {
+    return (
+      Number.isInteger(cellIndex) &&
+      cellIndex >= 0 &&
+      Boolean(palette?.[cellIndex]) &&
+      !isEmptyPaletteColor(palette[cellIndex])
+    );
+  }
+
+  function countFilledPatternCells(cells, palette) {
+    return cells.reduce(
+      (count, cellIndex) =>
+        count + (isFilledPatternCell(cellIndex, palette) ? 1 : 0),
+      0,
+    );
+  }
+
+  function calculateSourceSampleTargetRect({
+    viewport,
+    cols,
+    rows,
+    col,
+    row,
+    imageRect,
+  }) {
+    const safeCols = Math.max(1, Number(cols) || 1);
+    const safeRows = Math.max(1, Number(rows) || 1);
+    const spanX = Math.max(1e-9, viewport.right - viewport.left);
+    const spanY = Math.max(1e-9, viewport.bottom - viewport.top);
+    const leftRatio = (col / safeCols - viewport.left) / spanX;
+    const rightRatio = ((col + 1) / safeCols - viewport.left) / spanX;
+    const topRatio = (row / safeRows - viewport.top) / spanY;
+    const bottomRatio = ((row + 1) / safeRows - viewport.top) / spanY;
+    const x = imageRect.x + leftRatio * imageRect.width;
+    const y = imageRect.y + topRatio * imageRect.height;
+    const width = (rightRatio - leftRatio) * imageRect.width;
+    const height = (bottomRatio - topRatio) * imageRect.height;
+    return {
+      x,
+      y,
+      width,
+      height,
+      centerX: x + width / 2,
+      centerY: y + height / 2,
+    };
+  }
 
   const elements = {
     hero: $("#hero"),
@@ -44,6 +100,36 @@
     cropReset: $("#cropReset"),
     replaceButton: $("#replaceButton"),
     fileName: $("#fileName"),
+    annotationHeadActions: $("#annotationHeadActions"),
+    annotationPackageInput: $("#annotationPackageInput"),
+    annotationLoadPackageButton: $("#annotationLoadPackageButton"),
+    annotationExportButton: $("#annotationExportButton"),
+    annotationQueueBar: $("#annotationQueueBar"),
+    annotationQueueList: $("#annotationQueueList"),
+    annotationQueueSummary: $("#annotationQueueSummary"),
+    annotationPosition: $("#annotationPosition"),
+    annotationControls: $("#annotationControls"),
+    annotationForm: $("#annotationForm"),
+    annotationSceneCategory: $("#annotationSceneCategory"),
+    annotationSplit: $("#annotationSplit"),
+    annotationSceneTags: $("#annotationSceneTags"),
+    annotationTagCount: $("#annotationTagCount"),
+    annotationRightsStatus: $("#annotationRightsStatus"),
+    annotationDistribution: $("#annotationDistribution"),
+    annotationCreator: $("#annotationCreator"),
+    annotationSourceUrl: $("#annotationSourceUrl"),
+    annotationLicense: $("#annotationLicense"),
+    annotationAcquiredAt: $("#annotationAcquiredAt"),
+    annotationRightsHint: $("#annotationRightsHint"),
+    annotationNote: $("#annotationNote"),
+    annotationSaveState: $("#annotationSaveState"),
+    annotationHashState: $("#annotationHashState"),
+    annotationImageMeta: $("#annotationImageMeta"),
+    annotationValidation: $("#annotationValidation"),
+    annotationSaveButton: $("#annotationSaveButton"),
+    annotationSaveNextButton: $("#annotationSaveNextButton"),
+    annotationExportCard: $("#annotationExportCard"),
+    annotationExportSummary: $("#annotationExportSummary"),
     sourceCanvas: $("#sourceCanvas"),
     sourceEditor: $("#sourceEditor"),
     cornerMagnifier: $("#cornerMagnifier"),
@@ -76,6 +162,17 @@
     colorMerge: $("#colorMerge"),
     mergeValue: $("#mergeValue"),
     keepTransparent: $("#keepTransparent"),
+    resetImageAdjustments: $("#resetImageAdjustments"),
+    exposureAdjustment: $("#exposureAdjustment"),
+    exposureValue: $("#exposureValue"),
+    contrastAdjustment: $("#contrastAdjustment"),
+    contrastValue: $("#contrastValue"),
+    saturationAdjustment: $("#saturationAdjustment"),
+    saturationValue: $("#saturationValue"),
+    temperatureAdjustment: $("#temperatureAdjustment"),
+    temperatureValue: $("#temperatureValue"),
+    tintAdjustment: $("#tintAdjustment"),
+    tintValue: $("#tintValue"),
     beadPaletteSelect: $("#beadPaletteSelect"),
     mappingSchemeField: $("#mappingSchemeField"),
     mappingSchemeSelect: $("#mappingSchemeSelect"),
@@ -169,7 +266,14 @@
     rotation: 0,
     sourceView: null,
     sourcePan: { x: 0, y: 0 },
-    sourcePixelCache: null,
+    sourcePixelCache: new Map(),
+    imageAdjustments: {
+      exposure: 0,
+      contrast: 0,
+      saturation: 0,
+      temperature: 0,
+      tint: 0,
+    },
     recognitionSeed: null,
     clipboardFile: null,
     clipboardUrl: "",
@@ -245,8 +349,17 @@
   ];
   let mobileControlResizeObserver = null;
   let recognitionCorePromise = null;
+  let annotationCorePromise = null;
   const beadPaletteApi = globalThis.DougaoBeadPalettes || null;
   const colorMatchingApi = globalThis.DougaoColorMatching || null;
+  const imageAdjustmentsApi = globalThis.DougaoImageAdjustments || null;
+  const annotationSession = {
+    records: [],
+    pendingSamples: new Map(),
+    selectedIndex: -1,
+    hydratingForm: false,
+    switching: false,
+  };
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const sleepFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -345,6 +458,21 @@
     return recognitionCorePromise;
   }
 
+  function loadAnnotationCore() {
+    if (!annotationCorePromise) {
+      annotationCorePromise = Promise.all([
+        import("./annotation-tool/annotation-tool-core.mjs?integrated=2"),
+        import("./recognition/recognition-dataset-core.mjs?integrated=2"),
+      ])
+        .then(([tool, dataset]) => ({ tool, dataset }))
+        .catch((error) => {
+          annotationCorePromise = null;
+          throw error;
+        });
+    }
+    return annotationCorePromise;
+  }
+
   function showToast(message) {
     elements.toast.textContent = message;
     elements.toast.classList.add("show");
@@ -414,6 +542,7 @@
   }
 
   async function detectGrantedClipboardImage() {
+    if (annotationMode) return;
     if (mobileLayoutQuery.matches || coarsePointerQuery.matches) return;
     if (elements.hero.hidden || state.clipboardFile || !navigator.clipboard?.read) return;
     if (!navigator.permissions?.query) return;
@@ -470,6 +599,76 @@
   function updateRangeLabels() {
     elements.denoiseValue.value = labels.denoise[Number(elements.denoise.value)];
     elements.mergeValue.value = labels.merge[Number(elements.colorMerge.value)];
+    updateImageAdjustmentLabels();
+  }
+
+  function signedAdjustmentLabel(value, suffix = "") {
+    const numeric = Number(value) || 0;
+    return `${numeric > 0 ? "+" : ""}${numeric}${suffix}`;
+  }
+
+  function updateImageAdjustmentLabels() {
+    if (!elements.exposureAdjustment) return;
+    const exposure = (Number(elements.exposureAdjustment.value) || 0) / 10;
+    elements.exposureValue.value =
+      `${exposure > 0 ? "+" : ""}${exposure.toFixed(1)} EV`;
+    elements.contrastValue.value = signedAdjustmentLabel(elements.contrastAdjustment.value);
+    elements.saturationValue.value = signedAdjustmentLabel(elements.saturationAdjustment.value);
+    elements.temperatureValue.value = signedAdjustmentLabel(elements.temperatureAdjustment.value);
+    elements.tintValue.value = signedAdjustmentLabel(elements.tintAdjustment.value);
+  }
+
+  function setImageAdjustmentInputs(value = {}) {
+    const normalized = imageAdjustmentsApi?.normalizeAdjustments(value) || {
+      exposure: Number(value.exposure) || 0,
+      contrast: Number(value.contrast) || 0,
+      saturation: Number(value.saturation) || 0,
+      temperature: Number(value.temperature) || 0,
+      tint: Number(value.tint) || 0,
+    };
+    state.imageAdjustments = { ...normalized };
+    elements.exposureAdjustment.value = String(Math.round(normalized.exposure * 10));
+    elements.contrastAdjustment.value = String(Math.round(normalized.contrast));
+    elements.saturationAdjustment.value = String(Math.round(normalized.saturation));
+    elements.temperatureAdjustment.value = String(Math.round(normalized.temperature));
+    elements.tintAdjustment.value = String(Math.round(normalized.tint));
+    updateImageAdjustmentLabels();
+  }
+
+  function readImageAdjustments() {
+    const next = {
+      exposure: (Number(elements.exposureAdjustment.value) || 0) / 10,
+      contrast: Number(elements.contrastAdjustment.value) || 0,
+      saturation: Number(elements.saturationAdjustment.value) || 0,
+      temperature: Number(elements.temperatureAdjustment.value) || 0,
+      tint: Number(elements.tintAdjustment.value) || 0,
+    };
+    state.imageAdjustments =
+      imageAdjustmentsApi?.normalizeAdjustments(next) || next;
+    updateImageAdjustmentLabels();
+    return state.imageAdjustments;
+  }
+
+  function refreshImageAdjustmentsFromInputs() {
+    readImageAdjustments();
+    clearSourcePixelCache();
+    drawSourceThumb();
+    captureCurrentAnnotationDraft();
+    preservePaletteDebounced();
+  }
+
+  function clearSourcePixelCache() {
+    if (state.sourcePixelCache instanceof Map) state.sourcePixelCache.clear();
+    else state.sourcePixelCache = new Map();
+  }
+
+  function resetImageAdjustments({ refresh = true } = {}) {
+    setImageAdjustmentInputs(imageAdjustmentsApi?.DEFAULTS);
+    clearSourcePixelCache();
+    if (!refresh || !state.image) return;
+    drawSourceThumb();
+    preservePaletteDebounced();
+    captureCurrentAnnotationDraft();
   }
 
   function readCrop(syncFrame = false) {
@@ -541,7 +740,8 @@
   }
 
   function getSourcePixelData(maxSide = 1600) {
-    if (state.sourcePixelCache?.maxSide === maxSide) return state.sourcePixelCache;
+    if (!(state.sourcePixelCache instanceof Map)) state.sourcePixelCache = new Map();
+    if (state.sourcePixelCache.has(maxSide)) return state.sourcePixelCache.get(maxSide);
     const scale = Math.min(1, maxSide / Math.max(state.image.naturalWidth, state.image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(2, Math.round(state.image.naturalWidth * scale));
@@ -550,15 +750,23 @@
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
-    state.sourcePixelCache = {
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    imageAdjustmentsApi?.applyToImageData(imageData, state.imageAdjustments);
+    if (!imageAdjustmentsApi?.isNeutral(state.imageAdjustments)) {
+      ctx.putImageData(imageData, 0, 0);
+    }
+    const cached = {
       maxSide,
       width: canvas.width,
       height: canvas.height,
       scaleX: canvas.width / state.image.naturalWidth,
       scaleY: canvas.height / state.image.naturalHeight,
-      data: ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+      data: imageData.data,
+      imageData,
+      canvas,
     };
-    return state.sourcePixelCache;
+    state.sourcePixelCache.set(maxSide, cached);
+    return cached;
   }
 
   function detectImageKind() {
@@ -1274,14 +1482,18 @@
     file,
     image,
     url,
-    { detectionEngine = "auto", recognitionSeed = null } = {},
+    {
+      detectionEngine = "auto",
+      recognitionSeed = null,
+      annotationDraft = null,
+    } = {},
   ) {
     if (image.naturalWidth < 2 || image.naturalHeight < 2) {
       URL.revokeObjectURL(url);
       showToast("图片尺寸太小，无法识别网格");
       return;
     }
-    if (state.imageUrl) URL.revokeObjectURL(state.imageUrl);
+    if (state.imageUrl && !annotationMode) URL.revokeObjectURL(state.imageUrl);
     hideSourceSamplePreview();
     state.image = image;
     state.imageUrl = url;
@@ -1295,10 +1507,38 @@
     state.sourceZoom = 1;
     state.sourcePan = { x: 0, y: 0 };
     state.view = "source";
-    state.sourcePixelCache = null;
+    state.sourcePixelCache = new Map();
+    setImageAdjustmentInputs(imageAdjustmentsApi?.DEFAULTS);
     state.recognitionSeed = recognitionSeed;
     state.detectedMode = detectImageKind();
     suggestPhotoFrame();
+    if (annotationDraft) {
+      state.cols = clamp(
+        Math.round(Number(annotationDraft.cols) || 20),
+        2,
+        MAX_PATTERN_DIMENSION,
+      );
+      state.rows = clamp(
+        Math.round(Number(annotationDraft.rows) || 20),
+        2,
+        MAX_PATTERN_DIMENSION,
+      );
+      state.rotation = clamp(Number(annotationDraft.rotation) || 0, -15, 15);
+      state.frameMode = annotationDraft.frameMode === "free" ? "free" : "rect";
+      elements.sourceMode.value = ["auto", "pixel", "photo"].includes(
+        annotationDraft.sourceMode,
+      )
+        ? annotationDraft.sourceMode
+        : "auto";
+      setImageAdjustmentInputs(annotationDraft.imageAdjustments);
+      clearSourcePixelCache();
+      const sourceCorners =
+        Array.isArray(annotationDraft.corners) &&
+        annotationDraft.corners.length === 4
+          ? annotationDraft.corners
+          : defaultFrame();
+      state.frame = sourceCorners.map(sourcePointToView);
+    }
     state.sourcePalette = [];
     state.sourceCells = [];
     state.noBrandDraft = null;
@@ -1334,14 +1574,23 @@
     elements.hero.hidden = true;
     elements.workspace.hidden = false;
     document.body.classList.add("editing");
-    elements.rotationInput.value = "0";
-    elements.rotationValue.value = "0.0°";
+    elements.gridCols.value = state.cols;
+    elements.gridRows.value = state.rows;
+    elements.rotationInput.value = state.rotation.toFixed(1);
+    elements.rotationValue.value = `${state.rotation.toFixed(1)}°`;
     updateFrameMode();
     updateView();
     syncMobileControlCarousel({ align: true });
     drawSourceThumb();
     scrollPageToTop({ stabilize: true });
-    await autoDetect(true, { engine: detectionEngine });
+    if (annotationDraft) {
+      fitSourceFrameToViewport(0.8);
+      elements.detectHint.textContent =
+        "已恢复这张图片的人工标注；仍可使用自动候选辅助，再手动校准。";
+      await processImage({ resetHistory: true });
+    } else {
+      await autoDetect(true, { engine: detectionEngine });
+    }
   }
 
   async function loadFile(
@@ -1653,10 +1902,13 @@
     const x = (canvas.width - width) / 2 + state.sourcePan.x * width;
     const y = (canvas.height - height) / 2 + state.sourcePan.y * height;
     state.sourceView = { x, y, width, height, dpr };
+    const adjustedSource = getSourcePixelData(
+      Math.max(900, Math.min(3200, Math.ceil(Math.max(width, height)))),
+    );
     ctx.save();
     ctx.translate(x + width / 2, y + height / 2);
     ctx.rotate((state.rotation * Math.PI) / 180);
-    ctx.drawImage(state.image, -width / 2, -height / 2, width, height);
+    ctx.drawImage(adjustedSource.canvas, -width / 2, -height / 2, width, height);
     ctx.restore();
 
     const frame = state.frame.map(canvasFramePoint);
@@ -2054,6 +2306,7 @@
     if (dragType !== "pan") {
       markRecognitionCandidateCustom();
       syncCropFromFrame();
+      captureCurrentAnnotationDraft();
       processImage({ resetHistory: true, preservePalette: true });
     }
     event.preventDefault();
@@ -2535,7 +2788,12 @@
   async function analyzeWithHybridRecognition() {
     const recognition = await loadRecognitionCore();
     const maximumSide = 560;
-    const prepared = state.recognitionSeed
+    const neutralAdjustments =
+      !imageAdjustmentsApi || imageAdjustmentsApi.isNeutral(state.imageAdjustments);
+    const adjustedSource = neutralAdjustments
+      ? null
+      : getSourcePixelData(maximumSide);
+    const prepared = state.recognitionSeed && neutralAdjustments
       ? {
           canvas: {
             width: state.recognitionSeed.width,
@@ -2543,6 +2801,11 @@
           },
           imageData: state.recognitionSeed.imageData,
         }
+      : adjustedSource
+        ? {
+            canvas: adjustedSource.canvas,
+            imageData: adjustedSource.imageData,
+          }
       : recognition.makeAnalysisCanvas(
           state.image,
           {
@@ -2717,6 +2980,7 @@
         `已切换到${label === "推荐" ? "推荐结果" : label}：${state.cols} × ${state.rows}；` +
         "请在原图中检查格线，仍可继续手动校准。";
       await processImage({ resetHistory: true });
+      captureCurrentAnnotationDraft();
     } finally {
       elements.recognitionCandidates.classList.remove("busy");
       elements.detectButton.disabled = false;
@@ -2806,6 +3070,7 @@
               : "行列数与框选已检查；手动修改会立即更新图纸。"
             : `暂定 ${state.cols} × ${state.rows}；请检查行列数。手动修改后会立即更新图纸。`;
       await processImage({ resetHistory: true });
+      captureCurrentAnnotationDraft();
       if (isInitial) {
         chooseInitialZoom();
       }
@@ -3353,10 +3618,12 @@
     const mappings = new Map(
       scheme.mappings.map((mapping) => [mapping.sourceId, mapping]),
     );
+    const locks = getPaletteLocks();
     state.palette = state.sourcePalette.map((source, index) => {
       const mapping = mappings.get(source.id);
       const rgb = mapping?.targetRgb || source.rgb;
       const marker = source.marker || makeCode(index);
+      const isEmpty = locks[source.id] === EMPTY_MAPPING_CODE;
       return {
         r: rgb.r,
         g: rgb.g,
@@ -3369,11 +3636,16 @@
         codeCustomized: false,
         sourceId: source.id,
         sourceRgb: { ...source.rgb },
-        targetCode: mapping?.targetCode || null,
-        targetName: mapping?.targetName || "",
+        targetCode: isEmpty ? null : mapping?.targetCode || null,
+        targetName: isEmpty
+          ? "空白（无豆子）"
+          : mapping?.targetName || "",
         contributor: mapping?.contributor || "",
-        mappingMethod: mapping?.method || "identity",
-        locked: Boolean(mapping?.locked),
+        mappingMethod: isEmpty
+          ? "manual-empty"
+          : mapping?.method || "identity",
+        locked: isEmpty || Boolean(mapping?.locked),
+        isEmpty,
         localDeltaE00: mapping?.localDeltaE00 ?? 0,
         confidence: mapping?.confidence ?? 1,
         candidates: (mapping?.candidates || []).map((candidate) => ({
@@ -3418,6 +3690,11 @@
       return;
     }
     state.selectedPaletteRevision = palette.revision;
+    const colorLocks = Object.fromEntries(
+      Object.entries(getPaletteLocks(palette.id)).filter(
+        ([, targetCode]) => targetCode !== EMPTY_MAPPING_CODE,
+      ),
+    );
     state.mappingResults = colorMatchingApi.matchPalette({
       sourceColors: state.sourcePalette,
       sourceCells: state.sourceCells,
@@ -3426,7 +3703,7 @@
       palette: palette.colors,
       paletteId: palette.id,
       paletteRevision: palette.revision,
-      lockedMappings: getPaletteLocks(palette.id),
+      lockedMappings: colorLocks,
     });
     if (
       !listMappingSchemes().some(
@@ -3476,18 +3753,34 @@
     showToast(`${marker} 已指定并锁定为 ${targetCode}`);
   }
 
+  function setBrandMappingEmpty(sourceId) {
+    if (
+      !isBrandPaletteMode() ||
+      !state.sourcePalette.some((source) => source.id === sourceId)
+    ) {
+      return;
+    }
+    getPaletteLocks()[sourceId] = EMPTY_MAPPING_CODE;
+    applyBrandMatching();
+    const marker =
+      state.sourcePalette.find((source) => source.id === sourceId)?.marker ||
+      sourceId;
+    showToast(`${marker} 已设为空白，这些格子不会放豆子`);
+  }
+
   function toggleBrandMappingLock(sourceId) {
     const color = state.palette.find((entry) => entry.sourceId === sourceId);
-    if (!color?.targetCode) return;
     const locks = getPaletteLocks();
     if (locks[sourceId]) {
       delete locks[sourceId];
       applyBrandMatching();
-      showToast(`${color.name} 已恢复自动匹配`);
-    } else {
+      showToast(`${color?.name || sourceId} 已恢复自动匹配`);
+    } else if (color?.targetCode) {
       locks[sourceId] = color.targetCode;
       applyBrandMatching();
       showToast(`${color.name} · ${color.targetCode} 已锁定`);
+    } else {
+      return;
     }
   }
 
@@ -3508,9 +3801,10 @@
       return;
     }
     const query = elements.beadColorSearch.value.trim().toUpperCase();
-    const currentCode = state.palette.find(
+    const currentMapping = state.palette.find(
       (color) => color.sourceId === source.id,
-    )?.targetCode;
+    );
+    const currentCode = currentMapping?.targetCode;
     const colors = palette.colors
       .filter((color) => {
         if (!query) return true;
@@ -3532,6 +3826,27 @@
           colorMatchingApi.compareCodes(left.code, right.code),
       );
     const fragment = document.createDocumentFragment();
+    if (!query) {
+      const emptyButton = document.createElement("button");
+      emptyButton.type = "button";
+      emptyButton.className = `bead-color-option bead-color-empty-option${currentMapping?.isEmpty ? " current" : ""}`;
+      emptyButton.dataset.beadCode = EMPTY_MAPPING_CODE;
+      emptyButton.setAttribute("role", "option");
+      emptyButton.setAttribute(
+        "aria-selected",
+        String(Boolean(currentMapping?.isEmpty)),
+      );
+      const emptySwatch = document.createElement("i");
+      emptySwatch.className = "empty-color-swatch";
+      const emptyMeta = document.createElement("span");
+      const emptyCode = document.createElement("b");
+      emptyCode.textContent = "空白 · 无豆子";
+      const emptyName = document.createElement("small");
+      emptyName.textContent = "命中的格子留空，不写入采购数量";
+      emptyMeta.append(emptyCode, emptyName);
+      emptyButton.append(emptySwatch, emptyMeta);
+      fragment.append(emptyButton);
+    }
     colors.forEach((color) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -3563,7 +3878,7 @@
     elements.beadColorCount.textContent =
       query
         ? `找到 ${colors.length} 个色号，按与原图的色差排序`
-        : `${palette.brand} · ${palette.series} · ${colors.length} 个色号，按与原图的色差排序`;
+        : `${palette.brand} · ${palette.series} · 可留空或从 ${colors.length} 个色号中选择`;
   }
 
   function openBeadColorDialog(index) {
@@ -3817,7 +4132,7 @@
   }
 
   function patternColorLabel(color) {
-    if (!color) return "";
+    if (!color || isEmptyPaletteColor(color)) return "";
     return isBrandPaletteMode() && color.targetCode
       ? color.targetCode
       : color.name;
@@ -3861,7 +4176,7 @@
         );
         const x = margin + col * cell;
         const y = margin + row * cell;
-        if (paletteIndex < 0) {
+        if (!isFilledPatternCell(paletteIndex, state.palette)) {
           ctx.fillStyle = (row + col) % 2 ? "#f2f0eb" : "#e6e3dc";
           ctx.fillRect(x, y, cell, cell);
           continue;
@@ -4066,12 +4381,58 @@
     context.imageSmoothingQuality = "high";
     context.drawImage(localImage, drawX, drawY, drawWidth, drawHeight);
 
+    const target = calculateSourceSampleTargetRect({
+      viewport,
+      cols: state.cols,
+      rows: state.rows,
+      col: sample.col,
+      row: sample.row,
+      imageRect: {
+        x: drawX,
+        y: drawY,
+        width: drawWidth,
+        height: drawHeight,
+      },
+    });
+    const left = target.x;
+    const right = target.x + target.width;
+    const top = target.y;
+    const bottom = target.y + target.height;
+    const crossGap = 2.5;
+    const crossArm = Math.min(12, Math.max(7, Math.min(target.width, target.height) * 0.36));
+    context.save();
+    context.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    context.lineWidth = 1.35;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.shadowColor = "rgba(0, 0, 0, 0.92)";
+    context.shadowBlur = 2.4;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0.7;
+    context.strokeRect(
+      left + 0.7,
+      top + 0.7,
+      Math.max(0, target.width - 1.4),
+      Math.max(0, target.height - 1.4),
+    );
+    context.beginPath();
+    context.moveTo(Math.max(drawX, left - crossArm), target.centerY);
+    context.lineTo(left - crossGap, target.centerY);
+    context.moveTo(right + crossGap, target.centerY);
+    context.lineTo(Math.min(drawX + drawWidth, right + crossArm), target.centerY);
+    context.moveTo(target.centerX, Math.max(drawY, top - crossArm));
+    context.lineTo(target.centerX, top - crossGap);
+    context.moveTo(target.centerX, bottom + crossGap);
+    context.lineTo(target.centerX, Math.min(drawY + drawHeight, bottom + crossArm));
+    context.stroke();
+    context.restore();
+
     elements.sourceSampleTitle.textContent =
       `${sample.source.marker} · ${rgbToHex(sample.source)}`;
     elements.sourceSampleMeta.textContent =
       `第 ${sample.col + 1} 列 · 第 ${sample.row + 1} 行 · ${sample.occurrences} 格中最典型`;
     elements.sourceSampleHint.textContent =
-      "画面中央是这项颜色的代表格，可查看周围像素与文字";
+      "白框标出命中的代表格；框内仍可查看原图像素与文字";
   }
 
   function positionSourceSamplePreview(anchor) {
@@ -4233,14 +4594,22 @@
     const diagnostics = state.mappingResults?.diagnostics;
     const usedCodes = new Set(
       state.palette
-        .filter((color) => color.count > 0 && color.targetCode)
+        .filter(
+          (color) =>
+            color.count > 0 &&
+            !isEmptyPaletteColor(color) &&
+            color.targetCode,
+        )
         .map((color) => color.targetCode),
     );
     const lockedCount = Object.keys(getPaletteLocks()).length;
+    const emptyCount = state.palette.filter(
+      (color) => color.count > 0 && isEmptyPaletteColor(color),
+    ).length;
     if (diagnostics) {
       elements.mappingDiagnostics.textContent =
         `从 ${diagnostics.paletteColorCount} 个品牌色中，为 ${diagnostics.sourceColorCount} 种原图颜色生成匹配；` +
-        `当前使用 ${usedCodes.size} 个色号，${lockedCount} 项人工锁定，计算 ${diagnostics.runtimeMs.toFixed(1)} ms。`;
+        `当前使用 ${usedCodes.size} 个色号，${emptyCount} 项留空，${lockedCount} 项人工指定，计算 ${diagnostics.runtimeMs.toFixed(1)} ms。`;
     }
   }
 
@@ -4282,7 +4651,9 @@
       const sourceHex = document.createElement("b");
       sourceHex.textContent = rgbToHex(color.sourceRgb);
       const sourceCount = document.createElement("small");
-      sourceCount.textContent = `${color.count} 颗 · 保留为独立原色`;
+      sourceCount.textContent = color.isEmpty
+        ? `${color.count} 格 · 图纸中留空`
+        : `${color.count} 颗 · 保留为独立原色`;
       sourceMeta.append(sourceHex, sourceCount);
       sourceRow.append(sourceSwatch, sourceMeta);
       source.append(sourceLabel, sourceRow);
@@ -4294,22 +4665,27 @@
       targetLabel.textContent = `${palette.brand} · ${palette.series}`;
       const targetButton = document.createElement("button");
       targetButton.type = "button";
-      targetButton.className = "brand-target-main";
+      targetButton.className = `brand-target-main${color.isEmpty ? " empty-mapping" : ""}`;
       targetButton.dataset.action = "open-bead-picker";
       targetButton.setAttribute(
         "aria-label",
-        `为 ${color.name} 选择其他 ${palette.brand} 色号`,
+        color.isEmpty
+          ? `${color.name} 当前留空；点击选择 ${palette.brand} 色号`
+          : `为 ${color.name} 选择其他 ${palette.brand} 色号`,
       );
       const targetSwatch = document.createElement("i");
-      targetSwatch.className = "brand-color-swatch";
-      targetSwatch.style.background = colorCss(color);
+      targetSwatch.className = `brand-color-swatch${color.isEmpty ? " empty-color-swatch" : ""}`;
+      if (!color.isEmpty) targetSwatch.style.background = colorCss(color);
       const targetMeta = document.createElement("span");
       targetMeta.className = "brand-color-meta";
       const targetCode = document.createElement("b");
-      targetCode.textContent = color.targetCode || "—";
+      targetCode.textContent = color.isEmpty
+        ? "空白 · 无豆子"
+        : color.targetCode || "—";
       const targetName = document.createElement("small");
-      targetName.textContent =
-        color.targetName && color.targetName !== color.targetCode
+      targetName.textContent = color.isEmpty
+        ? "这些格子不写入图纸和采购数量"
+        : color.targetName && color.targetName !== color.targetCode
           ? color.targetName
           : "点击查看完整色表";
       targetMeta.append(targetCode, targetName);
@@ -4318,15 +4694,23 @@
       const quality = document.createElement("div");
       quality.className = "brand-match-quality";
       const qualityValue = document.createElement("strong");
-      qualityValue.textContent = `ΔE ${color.localDeltaE00.toFixed(1)} · 可信度 ${Math.round(color.confidence * 100)}%`;
+      qualityValue.textContent = color.isEmpty
+        ? `人工留空 · 减少 ${color.count} 颗豆子`
+        : `ΔE ${color.localDeltaE00.toFixed(1)} · 可信度 ${Math.round(color.confidence * 100)}%`;
       const lockButton = document.createElement("button");
       lockButton.type = "button";
       lockButton.dataset.action = "toggle-brand-lock";
       lockButton.classList.toggle("locked", color.locked);
-      lockButton.textContent = color.locked ? "已锁定" : "锁定";
+      lockButton.textContent = color.isEmpty
+        ? "恢复自动"
+        : color.locked
+          ? "已锁定"
+          : "锁定";
       lockButton.setAttribute(
         "aria-label",
-        color.locked
+        color.isEmpty
+          ? `恢复 ${color.name} 的自动品牌色匹配`
+          : color.locked
           ? `解除 ${color.name} 的人工色号锁定`
           : `锁定 ${color.name} 当前色号`,
       );
@@ -4335,6 +4719,27 @@
 
       const candidates = document.createElement("div");
       candidates.className = "brand-candidates";
+      const emptyCandidate = document.createElement("button");
+      emptyCandidate.type = "button";
+      emptyCandidate.className = `brand-candidate brand-empty-candidate${color.isEmpty ? " current" : ""}`;
+      emptyCandidate.dataset.action = "set-brand-empty";
+      emptyCandidate.setAttribute(
+        "aria-label",
+        `把 ${color.name} 设为空白，不放豆子`,
+      );
+      const emptyCandidateSwatch = document.createElement("i");
+      emptyCandidateSwatch.className = "empty-color-swatch";
+      const emptyCandidateMeta = document.createElement("span");
+      const emptyCandidateCode = document.createElement("b");
+      emptyCandidateCode.textContent = "空白";
+      const emptyCandidateDetail = document.createElement("small");
+      emptyCandidateDetail.textContent = "无豆子";
+      emptyCandidateMeta.append(
+        emptyCandidateCode,
+        emptyCandidateDetail,
+      );
+      emptyCandidate.append(emptyCandidateSwatch, emptyCandidateMeta);
+      candidates.append(emptyCandidate);
       const candidatePool = [...(color.candidates || [])];
       const selectedCandidate = candidatePool.find(
         (candidate) => candidate.code === color.targetCode,
@@ -4399,7 +4804,7 @@
     const fragment = document.createDocumentFragment();
     state.palette.forEach((color, index) => {
       const card = document.createElement("article");
-      card.className = `palette-mapping${index === state.selectedColor ? " active" : ""}`;
+      card.className = `palette-mapping${color.isEmpty ? " empty-mapping" : ""}${index === state.selectedColor ? " active" : ""}`;
       card.dataset.index = String(index);
 
       const target = document.createElement("div");
@@ -4412,24 +4817,33 @@
       targetColorRow.className = "target-color-row";
       const colorButton = document.createElement("button");
       colorButton.type = "button";
-      colorButton.className = "target-color-button";
+      colorButton.className = `target-color-button${color.isEmpty ? " empty-color-swatch" : ""}`;
       colorButton.dataset.action = "open-color-editor";
-      colorButton.setAttribute("aria-label", `修改 ${color.name} 的图纸颜色`);
+      colorButton.disabled = Boolean(color.isEmpty);
+      colorButton.setAttribute(
+        "aria-label",
+        color.isEmpty
+          ? `${color.name} 当前为空白`
+          : `修改 ${color.name} 的图纸颜色`,
+      );
       const colorSwatch = document.createElement("i");
-      colorSwatch.style.background = colorCss(color);
+      if (!color.isEmpty) colorSwatch.style.background = colorCss(color);
       colorButton.append(colorSwatch);
       const targetMeta = document.createElement("span");
       const targetName = document.createElement("b");
       targetName.className = "target-name";
-      targetName.textContent = color.name;
+      targetName.textContent = color.isEmpty ? `${color.name} · 空白` : color.name;
       const targetDetails = document.createElement("small");
       targetDetails.className = "target-details";
-      targetDetails.textContent = `${color.count} 颗`;
+      targetDetails.textContent = color.isEmpty
+        ? `${color.count} 格不放豆子`
+        : `${color.count} 颗`;
       targetMeta.append(targetName, targetDetails);
       targetColorRow.append(colorButton, targetMeta);
 
       const codeLabel = document.createElement("label");
       codeLabel.className = "palette-code-field";
+      codeLabel.hidden = Boolean(color.isEmpty);
       const codeCaption = document.createElement("span");
       codeCaption.textContent = "颜色标注";
       const codeInput = document.createElement("input");
@@ -4439,7 +4853,18 @@
       codeInput.dataset.action = "color-code";
       codeInput.setAttribute("aria-label", `修改图纸颜色 ${color.name} 的颜色标注`);
       codeLabel.append(codeCaption, codeInput);
-      target.append(targetHeading, targetColorRow, codeLabel);
+      const emptyToggle = document.createElement("button");
+      emptyToggle.type = "button";
+      emptyToggle.className = "palette-empty-toggle";
+      emptyToggle.dataset.action = "toggle-empty";
+      emptyToggle.textContent = color.isEmpty ? "恢复为颜色" : "设为空白";
+      emptyToggle.setAttribute(
+        "aria-label",
+        color.isEmpty
+          ? `恢复 ${color.name} 的图纸颜色`
+          : `把 ${color.name} 匹配为空白，不放豆子`,
+      );
+      target.append(targetHeading, targetColorRow, codeLabel, emptyToggle);
 
       const sourceMatches = document.createElement("div");
       sourceMatches.className = "palette-matches";
@@ -4452,6 +4877,7 @@
       pickButton.type = "button";
       pickButton.dataset.action = "pick-match";
       pickButton.textContent = "吸取";
+      pickButton.disabled = Boolean(color.isEmpty);
       pickButton.setAttribute("aria-label", `从原图为 ${color.name} 吸取匹配颜色`);
       matchesHeader.append(matchesHeading, pickButton);
 
@@ -4535,7 +4961,7 @@
         const paletteIndex = state.cells[row * state.cols + col];
         const x = col * cell;
         const y = row * cell;
-        if (paletteIndex < 0 || !state.palette[paletteIndex]) {
+        if (!isFilledPatternCell(paletteIndex, state.palette)) {
           ctx.fillStyle = (row + col) % 2 ? "#f2f0eb" : "#e3e0d9";
         } else {
           ctx.fillStyle = colorCss(state.palette[paletteIndex]);
@@ -4567,10 +4993,17 @@
     const usedColors = isBrandPaletteMode()
       ? new Set(
           state.palette
-            .filter((color) => color.count > 0 && color.targetCode)
+            .filter(
+              (color) =>
+                color.count > 0 &&
+                !isEmptyPaletteColor(color) &&
+                color.targetCode,
+            )
             .map((color) => color.targetCode),
         ).size
-      : state.palette.filter((color) => color.count > 0).length;
+      : state.palette.filter(
+          (color) => color.count > 0 && !isEmptyPaletteColor(color),
+        ).length;
     elements.livePreviewMeta.textContent =
       `${state.cols} × ${state.rows} · ${usedColors} ${isBrandPaletteMode() ? "色号" : "色"}`;
   }
@@ -4680,14 +5113,33 @@
   }
 
   function renderStatus() {
-    const filled = state.cells.filter((cell) => cell >= 0).length;
+    if (annotationMode && state.image) {
+      const sourceCorners = state.frame.map(viewPointToSource).map((point) => ({
+        x: clamp(point.x, 0, 1),
+        y: clamp(point.y, 0, 1),
+      }));
+      elements.gridStatus.textContent = `${state.cols} × ${state.rows} · 人工真值`;
+      elements.colorStatus.textContent = "完整原图坐标";
+      elements.confidenceStatus.textContent =
+        `外框覆盖 ${(annotationPolygonArea(sourceCorners) * 100).toFixed(1)}%`;
+      elements.confidenceStatus.style.color = "#39795f";
+      return;
+    }
+    const filled = countFilledPatternCells(state.cells, state.palette);
     const usedColors = isBrandPaletteMode()
       ? new Set(
           state.palette
-            .filter((color) => color.count > 0 && color.targetCode)
+            .filter(
+              (color) =>
+                color.count > 0 &&
+                !isEmptyPaletteColor(color) &&
+                color.targetCode,
+            )
             .map((color) => color.targetCode),
         ).size
-      : state.palette.filter((color) => color.count > 0).length;
+      : state.palette.filter(
+          (color) => color.count > 0 && !isEmptyPaletteColor(color),
+        ).length;
     const averageConfidence =
       state.confidences.reduce((sum, value) => sum + value, 0) / Math.max(1, state.confidences.length);
     elements.gridStatus.textContent = `${state.cols} × ${state.rows} · ${filled.toLocaleString()} 颗`;
@@ -5010,6 +5462,22 @@
     renderPalette();
   }
 
+  function toggleNoBrandEmpty(index) {
+    if (isBrandPaletteMode()) return;
+    const color = state.palette[index];
+    if (!color) return;
+    if (state.colorPickTarget === index) cancelColorPick({ redraw: false });
+    color.isEmpty = !color.isEmpty;
+    state.selectedColor = index;
+    state.paletteEdited = true;
+    renderAll();
+    showToast(
+      color.isEmpty
+        ? `${color.name} 已设为空白，这些格子不会放豆子`
+        : `${color.name} 已恢复为图纸颜色`,
+    );
+  }
+
   function applyColorEditor() {
     const index = state.colorEditorIndex;
     if (!state.palette[index]) {
@@ -5163,6 +5631,7 @@
       name: makeAvailableName(),
       code: rgbToHex(rgb),
       codeCustomized: false,
+      isEmpty: false,
       matches: [],
     };
     state.palette.push(entry);
@@ -5690,7 +6159,9 @@
     const { scale } = getPatternDimensions();
     const countMultiplier = scale * scale;
     const used = state.palette
-      .filter((color) => color.count > 0)
+      .filter(
+        (color) => color.count > 0 && !isEmptyPaletteColor(color),
+      )
       .map((color) => ({
         ...color,
         count: color.count * countMultiplier,
@@ -5805,13 +6276,13 @@
         );
         const x = margin + col * cell;
         const y = margin + row * cell;
-        if (paletteIndex < 0) {
+        if (!isFilledPatternCell(paletteIndex, state.palette)) {
           ctx.fillStyle = (row + col) % 2 ? "#f3f1eb" : "#e7e4dd";
         } else {
           ctx.fillStyle = colorCss(state.palette[paletteIndex]);
         }
         ctx.fillRect(x, y, cell, cell);
-        if (paletteIndex >= 0) {
+        if (isFilledPatternCell(paletteIndex, state.palette)) {
           const color = state.palette[paletteIndex];
           ctx.fillStyle = textColor(color);
           ctx.font = `700 ${Math.max(9, Math.floor(cell * 0.42))}px system-ui`;
@@ -5856,7 +6327,7 @@
     ctx.font = `${Math.round(12 * legendScale)}px system-ui`;
     ctx.fillText(
       `${dimensions.cols} × ${dimensions.rows} · ${
-        state.cells.filter((cellIndex) => cellIndex >= 0).length *
+        countFilledPatternCells(state.cells, state.palette) *
         dimensions.scale *
         dimensions.scale
       } 颗${
@@ -5980,7 +6451,9 @@
           col,
         );
         values.push(
-          cell < 0 ? "" : patternColorLabel(state.palette[cell]),
+          isFilledPatternCell(cell, state.palette)
+            ? patternColorLabel(state.palette[cell])
+            : "",
         );
       }
       rows.push(values.join(","));
@@ -6028,7 +6501,7 @@
     const countMultiplier = dimensions.scale * dimensions.scale;
     const data = {
       format: "dougao-pattern",
-      version: 4,
+      version: 5,
       colorModelVersion: 2,
       name: state.fileName,
       width: dimensions.cols,
@@ -6037,7 +6510,8 @@
       sourceWidth: state.cols,
       sourceHeight: state.rows,
       totalBeads:
-        state.cells.filter((cell) => cell >= 0).length * countMultiplier,
+        countFilledPatternCells(state.cells, state.palette) *
+        countMultiplier,
       beadPalette: beadPalette
         ? {
             id: beadPalette.id,
@@ -6061,6 +6535,9 @@
       lockedMappings: beadPalette
         ? { ...getPaletteLocks(beadPalette.id) }
         : {},
+      emptySourceIds: state.palette
+        .filter((color) => color.isEmpty && color.sourceId)
+        .map((color) => color.sourceId),
       sourcePalette: state.sourcePalette.map((color) => ({
         id: color.id,
         marker: color.marker,
@@ -6078,9 +6555,11 @@
           targetName: color.targetName || null,
           annotation: isBrandPaletteMode() ? null : color.code,
           hex: rgbToHex(color),
-          count: color.count * countMultiplier,
+          empty: Boolean(color.isEmpty),
+          sourceCellCount: color.count,
+          count: color.isEmpty ? 0 : color.count * countMultiplier,
         }))
-        .filter((color) => color.count),
+        .filter((color) => color.sourceCellCount),
       purchasePalette: getExportLegendColors().map((color) => ({
         markers: color.markers || [color.name],
         code: color.targetCode || null,
@@ -6097,9 +6576,9 @@
             row,
             col,
           );
-          return cell < 0
-            ? null
-            : patternColorLabel(state.palette[cell]);
+          return isFilledPatternCell(cell, state.palette)
+            ? patternColorLabel(state.palette[cell])
+            : null;
         }),
       ),
     };
@@ -6123,6 +6602,643 @@
       clearTimeout(timer);
       timer = setTimeout(() => fn(...args), delay);
     };
+  }
+
+  function annotationLocalDate() {
+    const now = new Date();
+    const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 10);
+  }
+
+  function cloneAnnotationCorners(corners) {
+    return (corners || defaultFrame()).map((point) => ({
+      x: Number(point.x),
+      y: Number(point.y),
+    }));
+  }
+
+  function createAnnotationDraft() {
+    return {
+      corners: [
+        { x: 0.08, y: 0.08 },
+        { x: 0.92, y: 0.08 },
+        { x: 0.92, y: 0.92 },
+        { x: 0.08, y: 0.92 },
+      ],
+      cols: 20,
+      rows: 20,
+      frameMode: "rect",
+      rotation: 0,
+      sourceMode: "auto",
+      imageAdjustments: { ...(imageAdjustmentsApi?.DEFAULTS || {}) },
+      sceneCategory: "",
+      sceneTags: [],
+      split: "development",
+      rightsStatus: "unknown",
+      distribution: "private",
+      creator: "",
+      sourceUrl: "",
+      license: "",
+      acquiredAt: annotationLocalDate(),
+      note: "",
+    };
+  }
+
+  function currentAnnotationRecord() {
+    return annotationSession.records[annotationSession.selectedIndex] || null;
+  }
+
+  function formatAnnotationBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / 1024 ** 2).toFixed(1)} MB`;
+  }
+
+  function annotationPolygonArea(corners) {
+    if (!Array.isArray(corners) || corners.length !== 4) return 0;
+    let area = 0;
+    corners.forEach((point, index) => {
+      const next = corners[(index + 1) % corners.length];
+      area += point.x * next.y - next.x * point.y;
+    });
+    return Math.abs(area / 2);
+  }
+
+  function setAnnotationValidation(message, kind = "") {
+    if (!elements.annotationValidation) return;
+    elements.annotationValidation.textContent = message;
+    elements.annotationValidation.classList.toggle("is-error", kind === "error");
+    elements.annotationValidation.classList.toggle("is-success", kind === "success");
+  }
+
+  function annotationGeometrySnapshot(draft) {
+    return JSON.stringify({
+      corners: draft.corners.map((point) => [
+        Math.round(point.x * 1e7) / 1e7,
+        Math.round(point.y * 1e7) / 1e7,
+      ]),
+      cols: Number(draft.cols),
+      rows: Number(draft.rows),
+      frameMode: draft.frameMode,
+      rotation: Number(draft.rotation),
+      sourceMode: draft.sourceMode,
+      imageAdjustments: draft.imageAdjustments,
+    });
+  }
+
+  function captureCurrentAnnotationDraft({
+    markDirty = true,
+    updateStatus = true,
+  } = {}) {
+    if (!annotationMode || annotationSession.switching || !state.image) return false;
+    const record = currentAnnotationRecord();
+    if (!record) return false;
+    const before = annotationGeometrySnapshot(record.draft);
+    const corners = state.frame.map(viewPointToSource).map((point) => ({
+      x: clamp(point.x, 0, 1),
+      y: clamp(point.y, 0, 1),
+    }));
+    record.draft.corners = corners;
+    record.draft.cols = state.cols;
+    record.draft.rows = state.rows;
+    record.draft.frameMode = state.frameMode;
+    record.draft.rotation = state.rotation;
+    record.draft.sourceMode = elements.sourceMode.value;
+    record.draft.imageAdjustments = { ...state.imageAdjustments };
+    const changed = before !== annotationGeometrySnapshot(record.draft);
+    if (changed && markDirty) record.dirty = true;
+    const coverage = annotationPolygonArea(corners);
+    elements.confidenceStatus.textContent =
+      `外框覆盖 ${(coverage * 100).toFixed(1)}%`;
+    if (updateStatus) updateAnnotationStatus();
+    return changed;
+  }
+
+  function markCurrentAnnotationDirty() {
+    if (!annotationMode || annotationSession.switching) return;
+    const record = currentAnnotationRecord();
+    if (!record) return;
+    record.dirty = true;
+    updateAnnotationStatus();
+  }
+
+  function updateAnnotationTagCount() {
+    if (!elements.annotationSceneTags) return;
+    const count = elements.annotationSceneTags.querySelectorAll(
+      "input:checked",
+    ).length;
+    elements.annotationTagCount.textContent =
+      count ? `已选择 ${count} 项` : "未选择";
+  }
+
+  function updateAnnotationRightsState() {
+    if (!elements.annotationRightsStatus) return;
+    const unresolved = ["unknown", "review-required"].includes(
+      elements.annotationRightsStatus.value,
+    );
+    const publicOption = elements.annotationDistribution.querySelector(
+      'option[value="repository-public"]',
+    );
+    publicOption.disabled = unresolved;
+    if (
+      unresolved &&
+      elements.annotationDistribution.value === "repository-public"
+    ) {
+      elements.annotationDistribution.value = "private";
+    }
+    elements.annotationRightsHint.classList.toggle("is-cleared", !unresolved);
+    elements.annotationRightsHint.textContent = unresolved
+      ? "当前状态只能保存在私有测试集。"
+      : "权利状态允许公开归档；发布前仍请保留作者、来源与许可凭据。";
+  }
+
+  function readAnnotationFormIntoDraft() {
+    const record = currentAnnotationRecord();
+    if (!record || annotationSession.hydratingForm) return;
+    record.draft.sceneCategory = elements.annotationSceneCategory.value;
+    record.draft.split = elements.annotationSplit.value;
+    record.draft.sceneTags = [
+      ...elements.annotationSceneTags.querySelectorAll("input:checked"),
+    ].map((input) => input.value);
+    record.draft.rightsStatus = elements.annotationRightsStatus.value;
+    record.draft.distribution = elements.annotationDistribution.value;
+    record.draft.creator = elements.annotationCreator.value;
+    record.draft.sourceUrl = elements.annotationSourceUrl.value;
+    record.draft.license = elements.annotationLicense.value;
+    record.draft.acquiredAt = elements.annotationAcquiredAt.value;
+    record.draft.note = elements.annotationNote.value;
+    record.dirty = true;
+    updateAnnotationTagCount();
+    updateAnnotationRightsState();
+    updateAnnotationStatus();
+  }
+
+  function hydrateAnnotationForm(record) {
+    if (!record) return;
+    annotationSession.hydratingForm = true;
+    elements.annotationSceneCategory.value = record.draft.sceneCategory;
+    elements.annotationSplit.value = record.draft.split;
+    elements.annotationRightsStatus.value = record.draft.rightsStatus;
+    elements.annotationDistribution.value = record.draft.distribution;
+    elements.annotationCreator.value = record.draft.creator;
+    elements.annotationSourceUrl.value = record.draft.sourceUrl;
+    elements.annotationLicense.value = record.draft.license;
+    elements.annotationAcquiredAt.value = record.draft.acquiredAt;
+    elements.annotationNote.value = record.draft.note;
+    for (const input of elements.annotationSceneTags.querySelectorAll("input")) {
+      input.checked = record.draft.sceneTags.includes(input.value);
+    }
+    updateAnnotationTagCount();
+    updateAnnotationRightsState();
+    annotationSession.hydratingForm = false;
+  }
+
+  function renderAnnotationQueue() {
+    if (!elements.annotationQueueList) return;
+    const fragment = document.createDocumentFragment();
+    annotationSession.records.forEach((record, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "annotation-queue-item";
+      button.dataset.annotationIndex = String(index);
+      button.setAttribute("role", "option");
+      button.setAttribute(
+        "aria-selected",
+        String(index === annotationSession.selectedIndex),
+      );
+      button.classList.toggle(
+        "is-saved",
+        Boolean(record.savedSample && !record.dirty),
+      );
+      button.classList.toggle(
+        "has-snapshot",
+        Boolean(record.savedSample && record.dirty),
+      );
+      const image = document.createElement("img");
+      image.src = record.objectUrl;
+      image.alt = "";
+      const copy = document.createElement("span");
+      const name = document.createElement("b");
+      name.textContent = record.fileName;
+      const meta = document.createElement("small");
+      meta.textContent =
+        record.savedSample && !record.dirty
+          ? "标注已保存"
+          : record.savedSample
+            ? "有未保存修改"
+            : "等待标注";
+      copy.append(name, meta);
+      const dot = document.createElement("i");
+      dot.setAttribute("aria-hidden", "true");
+      button.append(image, copy, dot);
+      fragment.append(button);
+    });
+    elements.annotationQueueList.replaceChildren(fragment);
+  }
+
+  function updateAnnotationStatus() {
+    if (!annotationMode || !elements.annotationQueueSummary) return;
+    const record = currentAnnotationRecord();
+    const records = annotationSession.records;
+    const savedCount = records.filter((item) => item.savedSample).length;
+    const completedCount = records.filter(
+      (item) => item.savedSample && !item.dirty,
+    ).length;
+    elements.annotationQueueSummary.textContent =
+      `${records.length} 张 · ${completedCount} 已完成`;
+    elements.annotationPosition.textContent = record
+      ? `第 ${annotationSession.selectedIndex + 1} / ${records.length} 张`
+      : "等待图片";
+    elements.annotationExportButton.disabled = savedCount === 0;
+    elements.annotationExportCard.disabled = savedCount === 0;
+    elements.annotationExportSummary.textContent = savedCount
+      ? `${savedCount} 张已保存，JSON 不含原图`
+      : "还没有已保存的图片";
+    if (record) {
+      elements.annotationSaveState.textContent =
+        record.savedSample && !record.dirty
+          ? "已保存"
+          : record.savedSample
+            ? "有未保存修改"
+            : "尚未保存";
+      elements.annotationHashState.textContent =
+        `SHA ${record.sha256.slice(0, 10)}…`;
+      elements.annotationImageMeta.textContent =
+        `${record.decodedWidth} × ${record.decodedHeight} · ` +
+        `${formatAnnotationBytes(record.byteSize)}`;
+    }
+    renderAnnotationQueue();
+  }
+
+  function annotationSampleToDraft(sample) {
+    const corners = cloneAnnotationCorners(sample.groundTruth.cornersNormalized);
+    return {
+      ...createAnnotationDraft(),
+      corners,
+      cols: sample.groundTruth.cols,
+      rows: sample.groundTruth.rows,
+      frameMode: frameRequiresFreeMode(corners) ? "free" : "rect",
+      sceneCategory: sample.scene.category,
+      sceneTags: [...sample.scene.tags],
+      split: sample.split,
+      rightsStatus: sample.rights.status,
+      distribution: sample.rights.distribution,
+      creator: sample.rights.creator || "",
+      sourceUrl: sample.rights.sourceUrl || "",
+      license: sample.rights.license || "",
+      acquiredAt: sample.rights.acquiredAt || annotationLocalDate(),
+      note: sample.annotation?.note || "",
+    };
+  }
+
+  function applyAnnotationSample(record, sample) {
+    record.draft = annotationSampleToDraft(sample);
+    record.savedSample = structuredClone(sample);
+    record.dirty = false;
+    record.initialized = true;
+    annotationSession.pendingSamples.delete(sample.source.sha256.toLowerCase());
+  }
+
+  async function sha256AnnotationFile(file) {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      await file.arrayBuffer(),
+    );
+    return [...new Uint8Array(digest)]
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  function decodeAnnotationImage(file, objectUrl) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error(`无法读取图片：${file.name}`));
+      image.src = objectUrl;
+    });
+  }
+
+  function looksLikeAnnotationImage(file) {
+    return Boolean(
+      file &&
+      (file.type.startsWith("image/") ||
+        /\.(png|jpe?g|webp|gif|bmp)$/i.test(file.name)),
+    );
+  }
+
+  async function addAnnotationFiles(fileList) {
+    const files = [...(fileList || [])].filter(looksLikeAnnotationImage);
+    if (!files.length) {
+      showToast("没有找到可读取的图片文件");
+      return;
+    }
+    let added = 0;
+    let skipped = 0;
+    for (const file of files) {
+      let objectUrl = "";
+      try {
+        objectUrl = URL.createObjectURL(file);
+        const [image, sha256] = await Promise.all([
+          decodeAnnotationImage(file, objectUrl),
+          sha256AnnotationFile(file),
+        ]);
+        if (
+          annotationSession.records.some((record) => record.sha256 === sha256)
+        ) {
+          URL.revokeObjectURL(objectUrl);
+          skipped += 1;
+          continue;
+        }
+        const record = {
+          file,
+          image,
+          objectUrl,
+          fileName: file.name,
+          mimeType: file.type || "image/unknown",
+          byteSize: file.size,
+          sha256,
+          decodedWidth: image.naturalWidth,
+          decodedHeight: image.naturalHeight,
+          draft: createAnnotationDraft(),
+          savedSample: null,
+          dirty: true,
+          initialized: false,
+        };
+        const pending = annotationSession.pendingSamples.get(sha256);
+        if (pending) applyAnnotationSample(record, pending);
+        annotationSession.records.push(record);
+        added += 1;
+      } catch (error) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        console.error(error);
+        showToast(error instanceof Error ? error.message : "图片读取失败");
+      }
+    }
+    elements.fileInput.value = "";
+    updateAnnotationStatus();
+    if (
+      annotationSession.selectedIndex < 0 &&
+      annotationSession.records.length
+    ) {
+      await selectAnnotationRecord(0);
+    }
+    showToast(
+      skipped
+        ? `已添加 ${added} 张；另有 ${skipped} 张重复图片被跳过`
+        : `已导入 ${added} 张完整原图`,
+    );
+  }
+
+  async function selectAnnotationRecord(index) {
+    const record = annotationSession.records[index];
+    if (!record) return;
+    captureCurrentAnnotationDraft();
+    const selectionToken = (annotationSession.selectionToken || 0) + 1;
+    annotationSession.selectionToken = selectionToken;
+    annotationSession.selectedIndex = index;
+    annotationSession.switching = true;
+    hydrateAnnotationForm(record);
+    updateAnnotationStatus();
+    setAnnotationValidation(
+      record.savedSample && !record.dirty
+        ? "这张图片的标注已经保存，可以继续修改或导出。"
+        : "自动候选可作为起点；请人工核对四角与行列数后保存。",
+      record.savedSample && !record.dirty ? "success" : "",
+    );
+    try {
+      await activateLoadedImage(record.file, record.image, record.objectUrl, {
+        annotationDraft: record.initialized ? record.draft : null,
+      });
+      if (selectionToken !== annotationSession.selectionToken) return;
+      record.initialized = true;
+    } finally {
+      if (selectionToken === annotationSession.selectionToken) {
+        annotationSession.switching = false;
+        captureCurrentAnnotationDraft({
+          markDirty: false,
+          updateStatus: false,
+        });
+        updateAnnotationStatus();
+        elements.annotationQueueList
+          .querySelector('[aria-selected="true"]')
+          ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
+  }
+
+  function annotationPackageFromSamples(dataset, samples) {
+    return {
+      kind: dataset.RECOGNITION_DATASET_KIND,
+      schemaVersion: dataset.RECOGNITION_DATASET_SCHEMA_VERSION,
+      createdAt: new Date().toISOString(),
+      tool: {
+        name: "dougao-integrated-recognition-annotator",
+        version: 2,
+      },
+      imagesIncluded: false,
+      coordinateSystem: {
+        origin: "top-left",
+        cornerOrder: [...dataset.RECOGNITION_CORNER_ORDER],
+        normalizedRange: [0, 1],
+        pixelReference: "browser-decoded-image",
+      },
+      samples,
+    };
+  }
+
+  function friendlyAnnotationValidationError(error) {
+    if (error.includes(".scene.category is invalid")) {
+      return "请选择这张图片的场景类别。";
+    }
+    if (error.includes("cornersNormalized is not a valid quad")) {
+      return "四个角点发生交叉或外框过小，请重新调整。";
+    }
+    if (error.includes("groundTruth.cols")) return "列数必须在 2–200 之间。";
+    if (error.includes("groundTruth.rows")) return "行数必须在 2–200 之间。";
+    if (error.includes("rights")) return "请检查素材授权状态与分发范围。";
+    return error;
+  }
+
+  async function saveCurrentAnnotation({ advance = false } = {}) {
+    const record = currentAnnotationRecord();
+    if (!record) return;
+    captureCurrentAnnotationDraft();
+    readAnnotationFormIntoDraft();
+    if (!elements.annotationForm.checkValidity()) {
+      elements.annotationForm.reportValidity();
+      setAnnotationValidation("请先补全必填信息。", "error");
+      return;
+    }
+    try {
+      const { tool, dataset } = await loadAnnotationCore();
+      if (!dataset.isValidRecognitionQuad(record.draft.corners)) {
+        setAnnotationValidation(
+          "四个角点发生交叉或外框过小，请重新调整。",
+          "error",
+        );
+        return;
+      }
+      const sample = tool.buildRecognitionAnnotationSample(
+        record,
+        record.draft,
+        new Date().toISOString(),
+      );
+      const result = dataset.validateRecognitionAnnotationPackage(
+        annotationPackageFromSamples(dataset, [sample]),
+      );
+      if (!result.valid) {
+        setAnnotationValidation(
+          friendlyAnnotationValidationError(result.errors[0]),
+          "error",
+        );
+        return;
+      }
+      record.savedSample = sample;
+      record.dirty = false;
+      const coverage = sample.groundTruth.frameCoverageRatio;
+      setAnnotationValidation(
+        coverage < 0.5
+          ? `标注已保存。外框只覆盖原图的 ${(coverage * 100).toFixed(1)}%，请确认主体确实不足一半。`
+          : "标注已保存；完整原图坐标与 SHA-256 已记录。",
+        "success",
+      );
+      updateAnnotationStatus();
+      if (
+        advance &&
+        annotationSession.selectedIndex <
+          annotationSession.records.length - 1
+      ) {
+        await selectAnnotationRecord(annotationSession.selectedIndex + 1);
+      }
+    } catch (error) {
+      console.error(error);
+      setAnnotationValidation("保存标注失败，请检查浏览器控制台。", "error");
+    }
+  }
+
+  function downloadAnnotationJson(payload) {
+    const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    anchor.href = url;
+    anchor.download = `dougao-recognition-annotations-${stamp}.json`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  async function exportAnnotationPackage() {
+    const samples = annotationSession.records
+      .map((record) => record.savedSample)
+      .filter(Boolean)
+      .map((sample) => structuredClone(sample));
+    if (!samples.length) return;
+    try {
+      const { dataset } = await loadAnnotationCore();
+      const payload = annotationPackageFromSamples(dataset, samples);
+      const result = dataset.validateRecognitionAnnotationPackage(payload);
+      if (!result.valid) {
+        setAnnotationValidation(
+          `导出前校验失败：${friendlyAnnotationValidationError(result.errors[0])}`,
+          "error",
+        );
+        return;
+      }
+      downloadAnnotationJson(payload);
+      showToast(`已导出 ${samples.length} 张图片的标注 JSON`);
+    } catch (error) {
+      console.error(error);
+      setAnnotationValidation("无法导出标注包。", "error");
+    }
+  }
+
+  async function importAnnotationPackage(file) {
+    if (!file) return;
+    try {
+      const importedPayload = JSON.parse(await file.text());
+      const { dataset } = await loadAnnotationCore();
+      const payload = dataset.migrateRecognitionAnnotationPackage(
+        importedPayload,
+      );
+      const result = dataset.validateRecognitionAnnotationPackage(payload);
+      if (!result.valid) {
+        throw new Error(
+          `标注包不符合当前规范：${friendlyAnnotationValidationError(result.errors[0])}`,
+        );
+      }
+      captureCurrentAnnotationDraft();
+      annotationSession.pendingSamples.clear();
+      payload.samples.forEach((sample) => {
+        annotationSession.pendingSamples.set(
+          sample.source.sha256.toLowerCase(),
+          sample,
+        );
+      });
+      let matched = 0;
+      annotationSession.records.forEach((record) => {
+        const sample = annotationSession.pendingSamples.get(record.sha256);
+        if (!sample) return;
+        applyAnnotationSample(record, sample);
+        matched += 1;
+      });
+      const currentIndex = annotationSession.selectedIndex;
+      if (currentIndex >= 0) {
+        annotationSession.selectedIndex = -1;
+        await selectAnnotationRecord(currentIndex);
+      }
+      updateAnnotationStatus();
+      showToast(
+        annotationSession.pendingSamples.size
+          ? `标注包有效，已匹配 ${matched} 张；请再导入其余 ${annotationSession.pendingSamples.size} 张原图`
+          : `标注包有效，已按 SHA-256 匹配 ${matched} 张原图`,
+      );
+    } catch (error) {
+      console.error(error);
+      showToast(error instanceof Error ? error.message : "无法读取标注包");
+    } finally {
+      elements.annotationPackageInput.value = "";
+    }
+  }
+
+  function initializeAnnotationMode() {
+    if (!annotationMode) return;
+    document.body.classList.add("annotation-mode");
+    document.title = "豆稿 · 识别数据标注";
+    elements.fileInput.multiple = true;
+    elements.annotationHeadActions.hidden = false;
+    elements.annotationQueueBar.hidden = false;
+    elements.annotationControls.hidden = false;
+    elements.exportButton.hidden = true;
+    $("#paletteControls").hidden = true;
+    elements.replaceButton.textContent = "＋ 添加图片";
+    $(".brand small").textContent = "DATA ANNOTATOR";
+    $(".hero-copy .eyebrow").textContent = "完整原图 · 四角真值 · 行列标注";
+    $(".hero-copy h1").innerHTML =
+      "沿用熟悉的编辑器，<br />标出<strong>可靠网格真值</strong>。";
+    $(".hero-copy .hero-desc").textContent =
+      "一次可导入多张完整原图。自动识别先给出候选，再用缩放、旋转、矩形或自由四角精确校准；图片和标注都只在本机处理。";
+    elements.dropZone.querySelector("h2.desktop-only").textContent =
+      "导入一组图片开始标注";
+    elements.dropZone.querySelector("p.desktop-only").textContent =
+      "支持多选或拖入多张图片，不进入裁剪流程";
+    elements.dropZone.querySelector("h2.mobile-only").textContent =
+      "选择图片开始标注";
+    elements.dropZone.querySelector("p.mobile-only").textContent =
+      "可以一次选择多张完整原图";
+    elements.selectButton.querySelector("b.desktop-only").textContent =
+      "选择多张图片";
+    elements.selectButton.querySelector("b.mobile-only").textContent =
+      "选择图片";
+    elements.clipboardCard.hidden = true;
+    updateAnnotationRightsState();
+    updateAnnotationTagCount();
+    updateAnnotationStatus();
   }
 
   const processDebounced = debounce(() => processImage({ resetHistory: true }), 260);
@@ -6161,6 +7277,7 @@
   function applyGridValues() {
     markRecognitionCandidateCustom();
     drawSourceThumb();
+    captureCurrentAnnotationDraft();
     elements.detectHint.textContent = `已手动设为 ${state.cols} × ${state.rows}，正在自动更新图纸；“重新识别”会重新推测行列数。`;
     processDebounced();
   }
@@ -6228,7 +7345,7 @@
 
   function setMobileControlPanelHeight(index = state.mobileControlIndex) {
     if (!elements.mobileControlPanels) return;
-    const panels = $$("[data-control-panel]");
+    const panels = $$("[data-control-panel]:not([hidden])");
     if (!mobileLayoutQuery.matches || !panels.length) {
       elements.mobileControlPanels.style.removeProperty("height");
       return;
@@ -6247,7 +7364,7 @@
   }
 
   function syncMobileControlCarousel({ align = false, behavior = "auto" } = {}) {
-    const panels = $$("[data-control-panel]");
+    const panels = $$("[data-control-panel]:not([hidden])");
     const carousel = elements.mobileControlPanels;
     if (!carousel || !panels.length) return;
     if (!mobileLayoutQuery.matches) {
@@ -6301,6 +7418,7 @@
     }
     updateFrameMode();
     drawSourceThumb();
+    captureCurrentAnnotationDraft();
   }
 
   function setRotation(value) {
@@ -6310,6 +7428,7 @@
     elements.rotationInput.value = state.rotation.toFixed(1);
     elements.rotationValue.value = `${state.rotation.toFixed(1)}°`;
     drawSourceThumb();
+    captureCurrentAnnotationDraft();
     preservePaletteDebounced();
   }
 
@@ -6322,6 +7441,10 @@
     });
     elements.replaceButton.addEventListener("click", () => elements.fileInput.click());
     elements.fileInput.addEventListener("change", () => {
+      if (annotationMode) {
+        void addAnnotationFiles(elements.fileInput.files);
+        return;
+      }
       const file = elements.fileInput.files[0];
       elements.fileInput.value = "";
       loadFile(file);
@@ -6347,7 +7470,10 @@
         elements.dropZone.classList.remove("dragging");
       });
     }
-    elements.dropZone.addEventListener("drop", (event) => loadFile(event.dataTransfer.files[0]));
+    elements.dropZone.addEventListener("drop", (event) => {
+      if (annotationMode) void addAnnotationFiles(event.dataTransfer.files);
+      else loadFile(event.dataTransfer.files[0]);
+    });
     document.addEventListener("paste", (event) => {
       const file =
         [...(event.clipboardData?.files || [])].find((item) => item.type.startsWith("image/")) ||
@@ -6356,7 +7482,8 @@
           ?.getAsFile();
       if (!file) return;
       event.preventDefault();
-      loadFile(file);
+      if (annotationMode) void addAnnotationFiles([file]);
+      else loadFile(file);
     });
 
     elements.cropClose.addEventListener("click", cancelCrop);
@@ -6468,7 +7595,8 @@
       const sourceId = state.beadColorSourceId;
       const code = button.dataset.beadCode;
       closeBeadColorDialog();
-      setManualBrandMapping(sourceId, code);
+      if (code === EMPTY_MAPPING_CODE) setBrandMappingEmpty(sourceId);
+      else setManualBrandMapping(sourceId, code);
     });
     elements.colorSvField.addEventListener("pointerdown", startColorSvPointer);
     elements.colorSvField.addEventListener("pointermove", moveColorSvPointer);
@@ -6598,6 +7726,19 @@
         processDebounced();
       });
     }
+    for (const input of $$("[data-image-adjustment]")) {
+      input.title = "双击归零";
+      input.addEventListener("input", refreshImageAdjustmentsFromInputs);
+      input.addEventListener("dblclick", (event) => {
+        event.preventDefault();
+        input.value = "0";
+        refreshImageAdjustmentsFromInputs();
+      });
+    }
+    elements.resetImageAdjustments.addEventListener("click", () => {
+      resetImageAdjustments();
+      showToast("原图调节已重置");
+    });
 
     elements.beadPaletteSelect.addEventListener("change", () => {
       selectBeadPalette(elements.beadPaletteSelect.value);
@@ -6614,7 +7755,9 @@
       mobileControlResizeObserver = new ResizeObserver(() => {
         setMobileControlPanelHeight();
       });
-      $$("[data-control-panel]").forEach((panel) => mobileControlResizeObserver.observe(panel));
+      $$("[data-control-panel]:not([hidden])").forEach((panel) =>
+        mobileControlResizeObserver.observe(panel),
+      );
     }
 
     elements.paletteList.addEventListener("pointerdown", startSourceSamplePress);
@@ -6657,10 +7800,14 @@
           state.palette[index]?.sourceId,
           actionTarget.dataset.code,
         );
+      } else if (action === "set-brand-empty") {
+        setBrandMappingEmpty(state.palette[index]?.sourceId);
       } else if (action === "toggle-brand-lock") {
         toggleBrandMappingLock(state.palette[index]?.sourceId);
       } else if (action === "open-color-editor") {
         openColorEditor(index);
+      } else if (action === "toggle-empty") {
+        toggleNoBrandEmpty(index);
       } else if (action === "pick-match") {
         beginColorPick(index);
       } else if (action === "remove-match") {
@@ -6754,6 +7901,47 @@
       updateView();
       drawSourceThumb();
     });
+
+    if (annotationMode) {
+      elements.annotationQueueList.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-annotation-index]");
+        if (button) {
+          void selectAnnotationRecord(Number(button.dataset.annotationIndex));
+        }
+      });
+      elements.annotationSceneTags.addEventListener("change", (event) => {
+        const input = event.target.closest('input[type="checkbox"]');
+        const group = input?.closest("[data-exclusive-tags]");
+        if (!input?.checked || !group) return;
+        for (const peer of group.querySelectorAll('input[type="checkbox"]')) {
+          if (peer !== input) peer.checked = false;
+        }
+      });
+      elements.annotationForm.addEventListener("input", readAnnotationFormIntoDraft);
+      elements.annotationForm.addEventListener("change", readAnnotationFormIntoDraft);
+      elements.annotationRightsStatus.addEventListener("change", () => {
+        updateAnnotationRightsState();
+        readAnnotationFormIntoDraft();
+      });
+      elements.annotationSaveButton.addEventListener("click", () => {
+        void saveCurrentAnnotation();
+      });
+      elements.annotationSaveNextButton.addEventListener("click", () => {
+        void saveCurrentAnnotation({ advance: true });
+      });
+      elements.annotationExportButton.addEventListener("click", () => {
+        void exportAnnotationPackage();
+      });
+      elements.annotationExportCard.addEventListener("click", () => {
+        void exportAnnotationPackage();
+      });
+      elements.annotationLoadPackageButton.addEventListener("click", () => {
+        elements.annotationPackageInput.click();
+      });
+      elements.annotationPackageInput.addEventListener("change", () => {
+        void importAnnotationPackage(elements.annotationPackageInput.files[0]);
+      });
+    }
 
     elements.exportDialog.addEventListener("click", (event) => {
       const button = event.target.closest("[data-export]");
@@ -6888,7 +8076,7 @@
           recognitionSeed,
         });
         return {
-          version: `v70-${state.recognitionEngine}`,
+          version: `v71-${state.recognitionEngine}`,
           engine: state.recognitionEngine,
           mode: state.detectedMode,
           cols: state.cols,
@@ -6916,6 +8104,7 @@
   function init() {
     elements.gridCols.max = String(MAX_PATTERN_DIMENSION);
     elements.gridRows.max = String(MAX_PATTERN_DIMENSION);
+    initializeAnnotationMode();
     restoreSettings();
     populateBeadPaletteSelect();
     const paletteErrors = beadPaletteApi?.validate?.() || [];
@@ -6926,7 +8115,7 @@
       elements.beadPaletteSelect.disabled = true;
     }
     bindEvents();
-    installRecognitionLabBridge();
+    if (!annotationMode) installRecognitionLabBridge();
     syncMobileEditorOrder();
     syncMobileControlCarousel({ align: true });
     updateFrameMode();
@@ -6942,7 +8131,7 @@
           )
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register("./sw-v70.js").catch(() => {});
+        navigator.serviceWorker.register("./sw-v71.js").catch(() => {});
       }
     }
     window.addEventListener(
@@ -6952,11 +8141,23 @@
       },
       { once: true },
     );
+    if (annotationMode) {
+      window.addEventListener("beforeunload", () => {
+        annotationSession.records.forEach((record) => {
+          URL.revokeObjectURL(record.objectUrl);
+        });
+      });
+    }
   }
 
   const coreApi = Object.freeze({
     MAX_PATTERN_DIMENSION,
+    EMPTY_MAPPING_CODE,
     clamp,
+    isEmptyPaletteColor,
+    isFilledPatternCell,
+    countFilledPatternCells,
+    calculateSourceSampleTargetRect,
     calculatePatternDimensions,
     patternCellIndexAt,
     median,

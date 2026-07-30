@@ -15,8 +15,8 @@
     <meta name="twitter:image" content="./og.png" />
     <title>豆稿 · 像素图转拼豆图纸</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="./manifest-v70.webmanifest" />
-    <link rel="stylesheet" href="./styles-v70.css" />
+    <link rel="manifest" href="./manifest-v71.webmanifest" />
+    <link rel="stylesheet" href="./styles-v71.css" />
   </head>
   <body>
     <header class="topbar">
@@ -96,27 +96,42 @@
         </div>
 
         <section class="home-details" id="homeGuide" aria-labelledby="homeGuideTitle">
-          <a class="lab-card" href="./recognition-lab/index.html">
-            <span class="lab-visual" aria-hidden="true">
-              <i class="lab-source"></i>
-              <i class="lab-frame lab-frame-one"></i>
-              <i class="lab-frame lab-frame-two"></i>
-              <b>82%</b>
-            </span>
-            <span class="lab-card-copy">
-              <small>副功能 · 算法验证工具</small>
-              <strong>识别实验室</strong>
-              <span>
-                在真实案例上查看旧算法与混合算法的候选结果，观察边界、行列数和置信度。
+          <div class="lab-tools">
+            <a class="lab-card" href="./recognition-lab/index.html">
+              <span class="lab-visual" aria-hidden="true">
+                <i class="lab-source"></i>
+                <i class="lab-frame lab-frame-one"></i>
+                <i class="lab-frame lab-frame-two"></i>
+                <b>82%</b>
               </span>
-              <em>
-                进入识别实验室
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M4 10h11M11 6l4 4-4 4" />
-                </svg>
-              </em>
-            </span>
-          </a>
+              <span class="lab-card-copy">
+                <small>副功能 · 算法验证工具</small>
+                <strong>识别实验室</strong>
+                <span>
+                  在真实案例上查看旧算法与混合算法的候选结果，观察边界、行列数和置信度。
+                </span>
+                <em>
+                  进入识别实验室
+                  <svg viewBox="0 0 20 20" aria-hidden="true">
+                    <path d="M4 10h11M11 6l4 4-4 4" />
+                  </svg>
+                </em>
+              </span>
+            </a>
+            <a class="annotation-card" href="./?mode=annotation">
+              <span class="annotation-card-visual" aria-hidden="true">
+                <i></i><i></i><i></i><i></i>
+              </span>
+              <span>
+                <small>数据集工具</small>
+                <strong>标注网格真值</strong>
+                <em>完整原图 · 四角 · 行列 · 来源</em>
+              </span>
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 10h11M11 6l4 4-4 4" />
+              </svg>
+            </a>
+          </div>
 
           <div class="home-guide">
             <header class="home-guide-head">
@@ -168,7 +183,7 @@
         </section>
 
         <footer class="site-version" aria-label="当前版本">
-          <span>豆稿 <b>v70</b></span>
+          <span>豆稿 <b>v71</b></span>
           <span>无需登录 · 图片仅在本机处理</span>
         </footer>
       </section>
@@ -182,7 +197,27 @@
           <div class="head-actions">
             <button class="text-button" id="replaceButton" type="button">更换图片</button>
             <button class="primary-button compact" id="exportButton" type="button">导出图纸</button>
+            <div class="annotation-head-actions" id="annotationHeadActions" hidden>
+              <input id="annotationPackageInput" type="file" accept="application/json,.json" hidden />
+              <button class="text-button" id="annotationLoadPackageButton" type="button">载入 JSON</button>
+              <button class="primary-button compact" id="annotationExportButton" type="button" disabled>
+                导出标注
+              </button>
+            </div>
           </div>
+        </div>
+
+        <div class="annotation-queue-bar" id="annotationQueueBar" hidden>
+          <span class="annotation-queue-summary">
+            <small id="annotationPosition">第 1 / 1 张</small>
+            <b id="annotationQueueSummary">0 张图片</b>
+          </span>
+          <div
+            class="annotation-queue-list"
+            id="annotationQueueList"
+            role="listbox"
+            aria-label="待标注图片"
+          ></div>
         </div>
 
         <div class="editor-layout">
@@ -292,6 +327,81 @@
                   <span><b>透明区域留空</b><small>适用于带透明背景的 PNG</small></span>
                   <input id="keepTransparent" type="checkbox" checked />
                 </label>
+                <div class="image-adjustment-panel">
+                  <header>
+                    <span>
+                      <b>原图调节</b>
+                      <small>改善淡网格与照片偏色 · 双击滑杆归零</small>
+                    </span>
+                    <button id="resetImageAdjustments" type="button">重置</button>
+                  </header>
+                  <div class="image-adjustment-list">
+                    <label>
+                      <span>曝光 <output id="exposureValue">0.0 EV</output></span>
+                      <input
+                        id="exposureAdjustment"
+                        data-image-adjustment="exposure"
+                        type="range"
+                        min="-20"
+                        max="20"
+                        step="1"
+                        value="0"
+                      />
+                    </label>
+                    <label>
+                      <span>对比度 <output id="contrastValue">0</output></span>
+                      <input
+                        id="contrastAdjustment"
+                        data-image-adjustment="contrast"
+                        type="range"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                    </label>
+                    <label>
+                      <span>饱和度 <output id="saturationValue">0</output></span>
+                      <input
+                        id="saturationAdjustment"
+                        data-image-adjustment="saturation"
+                        type="range"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                    </label>
+                    <label>
+                      <span>色温 <output id="temperatureValue">0</output></span>
+                      <input
+                        id="temperatureAdjustment"
+                        data-image-adjustment="temperature"
+                        type="range"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                    </label>
+                    <label>
+                      <span>色调 <output id="tintValue">0</output></span>
+                      <input
+                        id="tintAdjustment"
+                        data-image-adjustment="tint"
+                        type="range"
+                        min="-100"
+                        max="100"
+                        step="1"
+                        value="0"
+                      />
+                    </label>
+                  </div>
+                  <p>
+                    调节会影响原图预览、取色和图纸；不会改写上传文件。几何框不会自行跳动，
+                    需要时再点“重新识别”。
+                  </p>
+                </div>
                 <p class="hint">本区参数修改后会自动重新生成，无需点击“重新识别”。</p>
               </div>
             </div>
@@ -341,6 +451,157 @@
                   <button class="palette-reset-button" id="resetPaletteButton" type="button">重置颜色匹配</button>
                 </div>
                 <p class="hint">点选一项后仍可直接点击图纸中的豆子，进行单格修正。</p>
+              </div>
+            </div>
+
+            <div
+              class="control-section annotation-section"
+              id="annotationControls"
+              data-control-panel="3"
+              hidden
+            >
+              <header class="section-title">
+                <span><em>3</em> 标注信息</span>
+                <span class="section-swipe-cue" aria-hidden="true">
+                  <i class="swipe-cue-track"></i>
+                  <i class="swipe-cue-dot"></i>
+                </span>
+              </header>
+              <div class="section-body">
+                <p class="annotation-meta-status">
+                  <span><b id="annotationSaveState">尚未保存</b><small id="annotationHashState">等待哈希</small></span>
+                  <span id="annotationImageMeta">—</span>
+                </p>
+                <form id="annotationForm" class="annotation-form" novalidate>
+                  <label class="annotation-field">
+                    <span>场景类别 <em>必填</em></span>
+                    <select id="annotationSceneCategory" required>
+                      <option value="">请选择主要场景</option>
+                      <option value="pixel-art">像素画</option>
+                      <option value="pattern-chart">拼豆图纸</option>
+                      <option value="fused-bead-photo">已熨烫拼豆成品照片</option>
+                      <option value="holed-bead-photo">未熨烫带孔半成品照片</option>
+                    </select>
+                  </label>
+                  <label class="annotation-field">
+                    <span>数据划分</span>
+                    <select id="annotationSplit">
+                      <option value="development">开发集 · 可用于调试</option>
+                      <option value="validation">验证集 · 用于比较</option>
+                      <option value="holdout">锁定测试集 · 不参与调参</option>
+                    </select>
+                  </label>
+                  <details class="annotation-details">
+                    <summary>视觉标签 <small id="annotationTagCount">未选择</small></summary>
+                    <div class="annotation-tag-groups" id="annotationSceneTags">
+                      <section>
+                        <b>网格</b>
+                        <div class="annotation-check-grid" data-exclusive-tags>
+                          <label><input type="checkbox" value="grid-none" />无可见网格</label>
+                          <label><input type="checkbox" value="grid-visible" />明显网格</label>
+                          <label><input type="checkbox" value="grid-faint" />淡网格</label>
+                        </div>
+                      </section>
+                      <section>
+                        <b>背景</b>
+                        <div class="annotation-check-grid" data-exclusive-tags>
+                          <label><input type="checkbox" value="transparent-background" />透明背景</label>
+                          <label><input type="checkbox" value="plain-background" />纯色背景</label>
+                          <label><input type="checkbox" value="complex-background" />复杂背景</label>
+                        </div>
+                      </section>
+                      <section>
+                        <b>附加信息</b>
+                        <div class="annotation-check-grid">
+                          <label><input type="checkbox" value="text-labels" />文字标注</label>
+                          <label><input type="checkbox" value="color-codes" />色号编号</label>
+                          <label><input type="checkbox" value="watermark" />水印</label>
+                        </div>
+                      </section>
+                      <section>
+                        <b>成像与困难因素</b>
+                        <div class="annotation-check-grid">
+                          <label><input type="checkbox" value="blur" />模糊</label>
+                          <label><input type="checkbox" value="jpeg-compression" />JPEG 压缩</label>
+                          <label><input type="checkbox" value="noninteger-scaling" />非整数缩放</label>
+                          <label><input type="checkbox" value="rotation" />旋转</label>
+                          <label><input type="checkbox" value="perspective" />透视</label>
+                          <label><input type="checkbox" value="uneven-lighting" />光照不均</label>
+                          <label><input type="checkbox" value="reflection" />反光</label>
+                          <label><input type="checkbox" value="shadow" />阴影</label>
+                          <label><input type="checkbox" value="occlusion" />遮挡</label>
+                          <label><input type="checkbox" value="multiple-subjects" />多个主体</label>
+                          <label><input type="checkbox" value="missing-beads" />缺豆</label>
+                        </div>
+                      </section>
+                    </div>
+                  </details>
+                  <details class="annotation-details">
+                    <summary>来源与授权 <small>建议记录</small></summary>
+                    <label class="annotation-field">
+                      <span>素材权利状态</span>
+                      <select id="annotationRightsStatus">
+                        <option value="unknown">未知 · 仅私有测试</option>
+                        <option value="review-required">待核实 · 仅私有测试</option>
+                        <option value="owned">自己创作 / 拍摄</option>
+                        <option value="authorized">作者明确授权</option>
+                        <option value="cc0">CC0</option>
+                        <option value="cc-by">CC BY</option>
+                      </select>
+                    </label>
+                    <label class="annotation-field">
+                      <span>数据分发范围</span>
+                      <select id="annotationDistribution">
+                        <option value="private">仅本地私有数据集</option>
+                        <option value="repository-public">允许放入公开仓库</option>
+                      </select>
+                    </label>
+                    <label class="annotation-field">
+                      <span>作者 / 创作者</span>
+                      <input id="annotationCreator" type="text" maxlength="120" />
+                    </label>
+                    <label class="annotation-field">
+                      <span>原始来源链接</span>
+                      <input id="annotationSourceUrl" type="url" maxlength="500" placeholder="https://…" />
+                    </label>
+                    <label class="annotation-field">
+                      <span>许可说明</span>
+                      <input id="annotationLicense" type="text" maxlength="120" placeholder="例如 CC BY 4.0" />
+                    </label>
+                    <label class="annotation-field">
+                      <span>获取日期</span>
+                      <input id="annotationAcquiredAt" type="date" />
+                    </label>
+                    <p class="annotation-rights-hint" id="annotationRightsHint">
+                      当前状态只能保存在私有测试集。
+                    </p>
+                  </details>
+                  <label class="annotation-field">
+                    <span>人工说明</span>
+                    <textarea
+                      id="annotationNote"
+                      rows="3"
+                      maxlength="1000"
+                      placeholder="例如：外框沿底板格线，行列数已逐格核对。"
+                    ></textarea>
+                  </label>
+                </form>
+                <p class="annotation-validation" id="annotationValidation">
+                  使用上方网格组件校准四角与行列，然后保存标注。
+                </p>
+                <div class="annotation-save-actions">
+                  <button class="primary-button" id="annotationSaveButton" type="button">
+                    保存当前
+                  </button>
+                  <button class="text-button" id="annotationSaveNextButton" type="button">
+                    保存并下一张
+                  </button>
+                </div>
+                <button class="annotation-export-card" id="annotationExportCard" type="button" disabled>
+                  <span><b>导出标准标注包</b><small id="annotationExportSummary">还没有已保存的图片</small></span>
+                  <em>JSON ↓</em>
+                </button>
+                <p class="hint">JSON 不包含图片本体；请保留原图，并按 SHA-256 配对。</p>
               </div>
             </div>
             </div>
@@ -612,8 +873,9 @@
 
     <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="./bead-palettes-v70.js"></script>
-    <script src="./color-matching-core-v70.js"></script>
-    <script src="./app-v70.js"></script>
+    <script src="./bead-palettes-v71.js"></script>
+    <script src="./color-matching-core-v71.js"></script>
+    <script src="./image-adjustments-core-v71.js"></script>
+    <script src="./app-v71.js"></script>
   </body>
 </html>

@@ -43,7 +43,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -538,6 +539,12 @@ body.editing main {
   align-items: start;
 }
 
+.lab-tools {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
 .lab-card {
   position: relative;
   display: grid;
@@ -555,6 +562,130 @@ body.editing main {
   transition:
     transform 180ms ease,
     box-shadow 180ms ease;
+}
+
+.annotation-card {
+  display: grid;
+  min-height: 118px;
+  padding: 15px 16px;
+  border: 1px solid rgba(32, 35, 31, 0.12);
+  border-radius: 21px;
+  color: var(--ink);
+  background: rgba(255, 253, 248, 0.82);
+  box-shadow: 0 12px 32px rgba(32, 35, 31, 0.08);
+  grid-template-columns: 76px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 14px;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.annotation-card:hover,
+.annotation-card:focus-visible {
+  border-color: rgba(236, 97, 70, 0.4);
+  box-shadow: 0 17px 40px rgba(32, 35, 31, 0.12);
+  transform: translateY(-3px);
+}
+
+.annotation-card:focus-visible {
+  outline: 3px solid rgba(66, 124, 164, 0.38);
+  outline-offset: 3px;
+}
+
+.annotation-card-visual {
+  position: relative;
+  display: block;
+  width: 76px;
+  height: 72px;
+  border-radius: 13px;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 17px, rgba(32, 35, 31, 0.12) 17px 18px),
+    repeating-linear-gradient(0deg, transparent 0 17px, rgba(32, 35, 31, 0.12) 17px 18px),
+    #e9e4d9;
+}
+
+.annotation-card-visual::before {
+  position: absolute;
+  inset: 11px 8px 9px 10px;
+  border: 2px solid white;
+  box-shadow: 0 0 0 1px rgba(32, 35, 31, 0.7);
+  content: "";
+  transform: skew(-4deg, 2deg);
+}
+
+.annotation-card-visual i {
+  position: absolute;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: var(--yellow);
+}
+
+.annotation-card-visual i:nth-child(1) {
+  top: 6px;
+  left: 6px;
+}
+
+.annotation-card-visual i:nth-child(2) {
+  top: 8px;
+  right: 3px;
+}
+
+.annotation-card-visual i:nth-child(3) {
+  right: 7px;
+  bottom: 4px;
+}
+
+.annotation-card-visual i:nth-child(4) {
+  bottom: 6px;
+  left: 5px;
+}
+
+.annotation-card > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.annotation-card small {
+  color: var(--accent-dark);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.annotation-card strong {
+  margin-top: 5px;
+  font-size: 14px;
+}
+
+.annotation-card em {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-card > svg {
+  width: 20px;
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transition: transform 160ms ease;
+}
+
+.annotation-card:hover > svg {
+  transform: translateX(3px);
 }
 
 .lab-card:hover,
@@ -936,6 +1067,122 @@ body.editing main {
   gap: 7px;
 }
 
+.annotation-head-actions {
+  display: flex;
+  gap: 7px;
+}
+
+.annotation-queue-bar {
+  display: flex;
+  min-height: 76px;
+  padding: 9px 14px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: #f3efe6;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.annotation-queue-summary {
+  display: grid;
+  min-width: 104px;
+  padding: 4px 7px;
+  align-content: center;
+  gap: 3px;
+}
+
+.annotation-queue-summary small {
+  color: var(--accent-dark);
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.annotation-queue-summary b {
+  font-size: 12px;
+}
+
+.annotation-queue-list {
+  display: flex;
+  min-width: 0;
+  padding: 1px 2px 3px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: rgba(75, 69, 59, 0.24) transparent;
+  scrollbar-width: thin;
+  flex: 1;
+  gap: 7px;
+  scroll-snap-type: x proximity;
+}
+
+.annotation-queue-item {
+  display: grid;
+  width: 162px;
+  min-width: 162px;
+  height: 54px;
+  padding: 5px;
+  border: 1px solid rgba(79, 75, 65, 0.16);
+  border-radius: 11px;
+  color: var(--ink);
+  background: rgba(255, 253, 248, 0.82);
+  cursor: pointer;
+  grid-template-columns: 42px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 7px;
+  scroll-snap-align: start;
+  text-align: left;
+}
+
+.annotation-queue-item[aria-selected="true"] {
+  border-color: var(--accent);
+  background: #fff9f3;
+  box-shadow: inset 0 0 0 1px rgba(236, 97, 70, 0.13);
+}
+
+.annotation-queue-item img {
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  background: #e6e2d9;
+  object-fit: cover;
+}
+
+.annotation-queue-item > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.annotation-queue-item b,
+.annotation-queue-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-queue-item b {
+  font-size: 10px;
+}
+
+.annotation-queue-item small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.annotation-queue-item > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b6b0a4;
+}
+
+.annotation-queue-item.has-snapshot > i {
+  background: var(--yellow);
+}
+
+.annotation-queue-item.is-saved > i {
+  background: var(--mint);
+}
+
 .editor-layout {
   display: grid;
   min-height: calc(100vh - 162px);
@@ -1314,6 +1561,330 @@ body.editing main {
   margin-bottom: 22px;
 }
 
+.image-adjustment-panel {
+  margin-top: 18px;
+  padding-top: 17px;
+  border-top: 1px solid var(--line);
+}
+
+.image-adjustment-panel > header {
+  display: flex;
+  margin-bottom: 13px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.image-adjustment-panel > header > span {
+  display: grid;
+  gap: 2px;
+}
+
+.image-adjustment-panel > header b {
+  font-size: 12px;
+}
+
+.image-adjustment-panel > header small,
+.image-adjustment-panel > p {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.image-adjustment-panel > header button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.image-adjustment-list {
+  display: grid;
+  gap: 11px;
+}
+
+.image-adjustment-list label {
+  display: grid;
+  gap: 5px;
+}
+
+.image-adjustment-list label > span {
+  display: flex;
+  color: var(--ink);
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.image-adjustment-list output {
+  min-width: 48px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: right;
+}
+
+.image-adjustment-list input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.image-adjustment-panel > p {
+  margin: 13px 0 0;
+  line-height: 1.55;
+}
+
+.annotation-meta-status {
+  display: grid;
+  margin: 0 0 14px;
+  padding: 11px 12px;
+  border: 1px solid rgba(75, 155, 125, 0.18);
+  border-radius: 11px;
+  background: rgba(75, 155, 125, 0.055);
+  gap: 5px;
+}
+
+.annotation-meta-status > span:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.annotation-meta-status b {
+  font-size: 10px;
+}
+
+.annotation-meta-status small,
+.annotation-meta-status > span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-form {
+  display: grid;
+  gap: 11px;
+}
+
+.annotation-field {
+  display: grid;
+  gap: 5px;
+}
+
+.annotation-field > span,
+.annotation-details > summary {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.annotation-field > span em {
+  color: var(--accent-dark);
+  font-style: normal;
+}
+
+.annotation-field input,
+.annotation-field select,
+.annotation-field textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 10px;
+}
+
+.annotation-field textarea {
+  min-height: 74px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.annotation-details {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 253, 248, 0.56);
+}
+
+.annotation-details > summary {
+  display: flex;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.annotation-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.annotation-details > summary::after {
+  margin-left: auto;
+  padding-left: 7px;
+  color: var(--muted);
+  content: "＋";
+}
+
+.annotation-details[open] > summary::after {
+  content: "−";
+}
+
+.annotation-details > summary small {
+  margin-left: auto;
+  color: var(--blue);
+  font-size: 8px;
+}
+
+.annotation-details > .annotation-field,
+.annotation-check-grid {
+  margin-top: 10px;
+}
+
+.annotation-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.annotation-check-grid label {
+  display: flex;
+  min-width: 0;
+  color: var(--ink);
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+}
+
+.annotation-check-grid input {
+  margin: 0;
+}
+
+.annotation-tag-groups {
+  display: grid;
+  margin-top: 11px;
+  gap: 13px;
+}
+
+.annotation-tag-groups > section {
+  display: grid;
+  gap: 6px;
+}
+
+.annotation-tag-groups > section > b {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.annotation-tag-groups .annotation-check-grid {
+  margin-top: 0;
+}
+
+.annotation-rights-hint,
+.annotation-validation {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.annotation-rights-hint.is-cleared {
+  color: #39795f;
+}
+
+.annotation-validation {
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: rgba(66, 124, 164, 0.07);
+}
+
+.annotation-validation.is-error {
+  color: #9f3827;
+  background: rgba(236, 97, 70, 0.1);
+}
+
+.annotation-validation.is-success {
+  color: #39795f;
+  background: rgba(75, 155, 125, 0.1);
+}
+
+.annotation-save-actions {
+  display: grid;
+  margin-top: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.annotation-save-actions button {
+  min-height: 39px;
+  padding: 0 8px;
+  font-size: 9px;
+}
+
+.annotation-export-card {
+  display: flex;
+  width: 100%;
+  min-height: 62px;
+  margin-top: 9px;
+  padding: 10px 12px;
+  border: 1px solid rgba(236, 97, 70, 0.24);
+  border-radius: 11px;
+  color: var(--ink);
+  background: #fff8f3;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+}
+
+.annotation-export-card span {
+  display: grid;
+  gap: 3px;
+}
+
+.annotation-export-card b {
+  font-size: 10px;
+}
+
+.annotation-export-card small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.annotation-export-card em {
+  color: var(--accent-dark);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.annotation-export-card:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+body.annotation-mode .home-details,
+body.annotation-mode .site-version {
+  display: none;
+}
+
+body.annotation-mode .palette-section {
+  display: none;
+}
+
 .range-field > span,
 .number-field,
 .toggle-field {
@@ -1613,6 +2184,15 @@ body.editing main {
   box-shadow: inset 0 0 0 1px rgba(66, 124, 164, 0.42);
 }
 
+.palette-mapping.empty-mapping {
+  background:
+    linear-gradient(135deg, rgba(111, 116, 108, 0.035) 25%, transparent 25%)
+      0 0 / 8px 8px,
+    linear-gradient(315deg, rgba(111, 116, 108, 0.035) 25%, transparent 25%)
+      0 0 / 8px 8px,
+    white;
+}
+
 .palette-mapping.drop-target {
   border-color: var(--mint);
   background: rgba(110, 183, 148, 0.1);
@@ -1682,6 +2262,17 @@ body.editing main {
   place-items: center;
 }
 
+.target-color-button:disabled {
+  cursor: default;
+}
+
+.target-color-button.empty-color-swatch::after {
+  color: #72766f;
+  background: white;
+  box-shadow: 0 1px 4px rgba(24, 30, 28, 0.16);
+  content: "×";
+}
+
 .target-color-row span {
   display: grid;
   min-width: 0;
@@ -1727,6 +2318,25 @@ body.editing main {
   background: #fbfaf6;
   font-size: 10px;
   font-weight: 800;
+}
+
+.palette-empty-toggle {
+  min-height: 27px;
+  padding: 0 8px;
+  border: 1px dashed rgba(98, 102, 95, 0.34);
+  border-radius: 7px;
+  color: #696d66;
+  background: rgba(103, 108, 100, 0.055);
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.palette-mapping.empty-mapping .palette-empty-toggle {
+  border-style: solid;
+  border-color: rgba(66, 124, 164, 0.32);
+  color: var(--blue);
+  background: rgba(66, 124, 164, 0.075);
 }
 
 .matches-header {
@@ -1993,8 +2603,25 @@ body.editing main {
   color: var(--blue);
 }
 
+.brand-target-main.empty-mapping {
+  padding: 5px;
+  border: 1px dashed rgba(100, 104, 97, 0.28);
+  border-radius: 9px;
+  background: rgba(105, 110, 101, 0.045);
+}
+
 .brand-target-main .brand-color-swatch {
   position: relative;
+}
+
+.empty-color-swatch,
+.target-color-button.empty-color-swatch > i {
+  background:
+    linear-gradient(45deg, #d9d8d2 25%, transparent 25%) 0 0 / 8px 8px,
+    linear-gradient(-45deg, #d9d8d2 25%, transparent 25%) 0 4px / 8px 8px,
+    linear-gradient(45deg, transparent 75%, #d9d8d2 75%) 4px -4px / 8px 8px,
+    linear-gradient(-45deg, transparent 75%, #d9d8d2 75%) -4px 0 / 8px 8px,
+    #f7f6f2 !important;
 }
 
 .brand-match-quality {
@@ -2061,6 +2688,14 @@ body.editing main {
   border-color: rgba(66, 124, 164, 0.45);
   color: var(--blue);
   background: rgba(66, 124, 164, 0.075);
+}
+
+.brand-empty-candidate {
+  border-style: dashed;
+}
+
+.brand-empty-candidate.current {
+  border-style: solid;
 }
 
 .brand-candidate i {
@@ -3666,6 +4301,15 @@ body.editing main {
   background: rgba(66, 124, 164, 0.075);
 }
 
+.bead-color-empty-option {
+  border-style: dashed;
+  grid-column: 1 / -1;
+}
+
+.bead-color-empty-option.current {
+  border-style: solid;
+}
+
 .bead-color-option > i {
   display: block;
   width: 28px;
@@ -4389,6 +5033,10 @@ body.editing main {
     left: 4px;
   }
 
+  [data-control-panel="3"] .swipe-cue-dot {
+    left: 4px;
+  }
+
   .control-section.mobile-active .section-swipe-cue {
     animation: section-swipe-cue-fade 3.6s ease 450ms both;
   }
@@ -4402,6 +5050,10 @@ body.editing main {
   }
 
   .control-section.mobile-active[data-control-panel="2"] .swipe-cue-dot {
+    animation: section-swipe-cue-right 3.6s ease-in-out 450ms both;
+  }
+
+  .control-section.mobile-active[data-control-panel="3"] .swipe-cue-dot {
     animation: section-swipe-cue-right 3.6s ease-in-out 450ms both;
   }
 
@@ -5068,5 +5720,30 @@ body.editing main {
   .brand-color-swatch {
     width: 30px;
     height: 30px;
+  }
+}
+
+@media (max-width: 680px) {
+  body.annotation-mode .annotation-queue-summary {
+    min-width: 82px;
+    padding-inline: 3px;
+  }
+
+  body.annotation-mode .annotation-queue-item {
+    width: 138px;
+    min-width: 138px;
+  }
+
+  .annotation-head-actions {
+    gap: 5px;
+  }
+
+  .annotation-head-actions .text-button,
+  .annotation-head-actions .primary-button {
+    padding-inline: 8px;
+  }
+
+  .image-adjustment-list {
+    gap: 14px;
   }
 }
